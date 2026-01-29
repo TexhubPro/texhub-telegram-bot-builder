@@ -1,0 +1,938 @@
+﻿import { Head } from '@inertiajs/react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ReactFlow, {
+    addEdge,
+    Background,
+    ConnectionLineType,
+    Controls,
+    type Connection,
+    type Edge,
+    type Node,
+    useEdgesState,
+    useNodesState,
+} from 'reactflow';
+import 'reactflow/dist/style.css';
+import { AppNavbar } from '../components/layout/navbar';
+import { AddEdgeMenuContext } from '../components/nodes/add-edge-context';
+import { BotActionsContext } from '../components/nodes/bot-actions-context';
+import { BotNode } from '../components/nodes/bot-node';
+import { CommandNode } from '../components/nodes/command-node';
+import { NodeContextMenu } from '../components/nodes/context-menu';
+import { MessageButtonNode } from '../components/nodes/message-button-node';
+import { MessageNode } from '../components/nodes/message-node';
+import { ReplyButtonNode } from '../components/nodes/reply-button-node';
+import { StyledNode } from '../components/nodes/styled-node';
+import { Sidebar } from '../components/sidebar/sidebar';
+import type { Bot, ContextMenu, NodeData, NodeKind } from '../components/types';
+
+const API_BASE = 'http://localhost:8001';
+
+const initialNodes: Node<NodeData>[] = [];
+const initialEdges: Edge[] = [];
+
+const NODE_KIND_LABELS: Record<NodeKind, string> = {
+    bot: 'Бот',
+    command: 'Команда',
+    message: 'Сообщение',
+    message_button: 'Message Button',
+    reply_button: 'Reply Button',
+    node: 'Блок',
+};
+
+const layoutTree = (nodes: Node<NodeData>[], edges: Edge[]) => {
+    const adjacency = new Map<string, string[]>();
+    const inDegree = new Map<string, number>();
+
+    nodes.forEach((node) => {
+        adjacency.set(node.id, []);
+        inDegree.set(node.id, 0);
+    });
+
+    edges.forEach((edge) => {
+        if (!adjacency.has(edge.source) || !adjacency.has(edge.target)) {
+            return;
+        }
+        adjacency.get(edge.source)?.push(edge.target);
+        inDegree.set(edge.target, (inDegree.get(edge.target) ?? 0) + 1);
+    });
+
+    const roots = nodes.filter((node) => (inDegree.get(node.id) ?? 0) === 0).map((node) => node.id);
+    const queue = roots.length ? [...roots] : nodes.map((node) => node.id);
+    const depth = new Map<string, number>();
+    const order = new Map<string, number>();
+    let orderIndex = 0;
+
+    while (queue.length) {
+        const current = queue.shift();
+        if (!current || order.has(current)) {
+            continue;
+        }
+        order.set(current, orderIndex);
+        orderIndex += 1;
+        const currentDepth = depth.get(current) ?? 0;
+        const children = adjacency.get(current) ?? [];
+        children.forEach((child) => {
+            if (!depth.has(child)) {
+                depth.set(child, currentDepth + 1);
+            }
+            queue.push(child);
+        });
+    }
+
+    nodes.forEach((node) => {
+        if (!depth.has(node.id)) {
+            depth.set(node.id, 0);
+        }
+        if (!order.has(node.id)) {
+            order.set(node.id, orderIndex);
+            orderIndex += 1;
+        }
+    });
+
+    const levels = new Map<number, string[]>();
+    nodes.forEach((node) => {
+        const level = depth.get(node.id) ?? 0;
+        const list = levels.get(level) ?? [];
+        list.push(node.id);
+        levels.set(level, list);
+    });
+
+    const positions = new Map<string, { x: number; y: number }>();
+    const levelKeys = [...levels.keys()].sort((a, b) => a - b);
+    const startX = 140;
+    const startY = 120;
+    const gapX = 280;
+    const gapY = 140;
+
+    levelKeys.forEach((level) => {
+        const list = levels.get(level) ?? [];
+        list.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+        list.forEach((id, index) => {
+            positions.set(id, { x: startX + level * gapX, y: startY + index * gapY });
+        });
+    });
+
+    return positions;
+};
+
+const getNodeTitle = (node: Node<NodeData>) => {
+    switch (node.data.kind) {
+        case 'command':
+            return node.data.commandText ?? node.data.label;
+        case 'message':
+            return node.data.messageText ?? node.data.label;
+        case 'bot':
+            return node.data.botName ?? node.data.label;
+        case 'message_button':
+        case 'reply_button':
+            return node.data.buttonText ?? node.data.label;
+        default:
+            return node.data.label;
+    }
+};
+
+const getNodeSubtitle = (node: Node<NodeData>) => NODE_KIND_LABELS[node.data.kind ?? 'node'];
+
+const getClientPosition = (event: MouseEvent | TouchEvent) => {
+    if ('changedTouches' in event && event.changedTouches.length > 0) {
+        const touch = event.changedTouches[0];
+        return { x: touch.clientX, y: touch.clientY };
+    }
+    const mouseEvent = event as MouseEvent;
+    return { x: mouseEvent.clientX, y: mouseEvent.clientY };
+};
+
+export default function Welcome() {
+    const [nodes, setNodes, onNodesChange] = useNodesState<NodeData>(initialNodes);
+    const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+    const [menu, setMenu] = useState<ContextMenu | null>(null);
+    const [linkSearch, setLinkSearch] = useState('');
+    const [layoutRequested, setLayoutRequested] = useState(true);
+    const [bot, setBot] = useState<Bot | null>(null);
+    const [isHydrating, setIsHydrating] = useState(false);
+    const [searchTerm, setSearchTerm] = useState('');
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const saveTimerRef = useRef<number | null>(null);
+    const connectSourceRef = useRef<string | null>(null);
+    const suppressPaneClickRef = useRef(false);
+
+    const nodeTypes = useMemo(
+        () => ({
+            styled: StyledNode,
+            command: CommandNode,
+            message: MessageNode,
+            message_button: MessageButtonNode,
+            reply_button: ReplyButtonNode,
+            bot: BotNode,
+        }),
+        []
+    );
+
+    const generateId = useCallback((prefix: string) => {
+        if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+            return `${prefix}-${crypto.randomUUID()}`;
+        }
+        return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    }, []);
+
+    const requestLayout = useCallback(() => {
+        setLayoutRequested(true);
+    }, []);
+
+    const handleEdgesChange = useCallback(
+        (changes: import('reactflow').EdgeChange[]) => {
+            onEdgesChange(changes);
+            if (changes.some((change) => change.type === 'add' || change.type === 'remove')) {
+                requestLayout();
+            }
+        },
+        [onEdgesChange, requestLayout]
+    );
+
+    const handleNodesChange = useCallback(
+        (changes: import('reactflow').NodeChange[]) => {
+            onNodesChange(changes);
+        },
+        [onNodesChange]
+    );
+
+    const handleOpenAddMenu = useCallback((nodeId: string, position: { x: number; y: number }) => {
+        suppressPaneClickRef.current = true;
+        setLinkSearch('');
+        setMenu({ kind: 'add-edge', id: nodeId, x: position.x, y: position.y });
+    }, []);
+
+    const handleConnectStart = useCallback(
+        (_event: React.MouseEvent | React.TouchEvent, params: import('reactflow').OnConnectStartParams) => {
+            if (params.handleType && params.handleType !== 'source') {
+                connectSourceRef.current = null;
+                return;
+            }
+            connectSourceRef.current = params.nodeId ?? null;
+        },
+        []
+    );
+
+    const handleConnectEnd = useCallback(
+        (event: MouseEvent | TouchEvent) => {
+            const sourceId = connectSourceRef.current;
+            connectSourceRef.current = null;
+            if (!sourceId) {
+                return;
+            }
+            const target = event.target;
+            if (!target || !(target instanceof Element)) {
+                return;
+            }
+            if (target.closest('.react-flow__node') || target.closest('.react-flow__handle') || target.closest('.react-flow__edge')) {
+                return;
+            }
+            const coords = getClientPosition(event);
+            handleOpenAddMenu(sourceId, coords);
+        },
+        [handleOpenAddMenu]
+    );
+
+    const onConnect = useCallback(
+        (connection: Connection) => {
+            setEdges((eds) => addEdge({ ...connection, type: 'bezier' }, eds));
+            requestLayout();
+        },
+        [requestLayout, setEdges]
+    );
+
+    const addNode = useCallback(
+        (node: Node<NodeData>) => {
+            setNodes((nds) => nds.concat(node));
+            requestLayout();
+        },
+        [requestLayout, setNodes]
+    );
+
+    const handleAddCommandNode = useCallback(() => {
+        const command = window.prompt('Команда', '/start');
+        if (!command) {
+            return;
+        }
+        addNode({
+            id: generateId('command'),
+            type: 'command',
+            position: { x: 180, y: 180 },
+            data: { label: 'Команда', kind: 'command', commandText: command },
+        });
+    }, [addNode, generateId]);
+
+    const handleAddMessageNode = useCallback(() => {
+        const message = window.prompt('Сообщение', 'Привет');
+        if (!message) {
+            return;
+        }
+        addNode({
+            id: generateId('message'),
+            type: 'message',
+            position: { x: 420, y: 180 },
+            data: { label: 'Сообщение', kind: 'message', messageText: message },
+        });
+    }, [addNode, generateId]);
+
+    const handleAddMessageButtonNode = useCallback(() => {
+        const text = window.prompt('Текст кнопки', 'Подробнее');
+        if (!text) {
+            return;
+        }
+        addNode({
+            id: generateId('message_button'),
+            type: 'message_button',
+            position: { x: 520, y: 220 },
+            data: { label: 'Message Button', kind: 'message_button', buttonText: text },
+        });
+    }, [addNode, generateId]);
+
+    const handleAddReplyButtonNode = useCallback(() => {
+        const text = window.prompt('Текст кнопки', 'Да');
+        if (!text) {
+            return;
+        }
+        addNode({
+            id: generateId('reply_button'),
+            type: 'reply_button',
+            position: { x: 520, y: 260 },
+            data: { label: 'Reply Button', kind: 'reply_button', buttonText: text },
+        });
+    }, [addNode, generateId]);
+
+
+    const applyBotToNode = useCallback(
+        (botData: Bot) => {
+            setNodes((nds) => {
+                const rest = nds.filter((node) => node.data.kind !== 'bot');
+                const existingBotNode = nds.find((node) => node.data.kind === 'bot');
+                const position = existingBotNode?.position ?? { x: 140, y: 120 };
+                return rest.concat({
+                    id: existingBotNode?.id ?? `bot-${botData.id}`,
+                    type: 'bot',
+                    position,
+                    data: {
+                        label: botData.name,
+                        kind: 'bot',
+                        botName: botData.name,
+                        botToken: botData.token ?? undefined,
+                        botStatus: botData.status,
+                    },
+                });
+            });
+        },
+        [setNodes]
+    );
+
+    const handleAddBot = useCallback(async () => {
+        if (!bot) {
+            return;
+        }
+        const name = window.prompt('Название бота', bot.name ?? 'Main Bot');
+        if (!name) {
+            return;
+        }
+        const token = window.prompt('Токен бота', bot.token ?? '');
+        const response = await fetch(`${API_BASE}/bots/${bot.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, token: token || null }),
+        });
+        if (!response.ok) {
+            return;
+        }
+        const updated: Bot = await response.json();
+        setBot(updated);
+        applyBotToNode(updated);
+    }, [bot, applyBotToNode]);
+
+    const handleNodeContextMenu = useCallback((event: React.MouseEvent, node: Node<NodeData>) => {
+        event.preventDefault();
+        setMenu({ kind: 'node', id: node.id, x: event.clientX, y: event.clientY });
+    }, []);
+
+    const handleEdgeContextMenu = useCallback((event: React.MouseEvent, edge: Edge) => {
+        event.preventDefault();
+        setMenu({ kind: 'edge', id: edge.id, x: event.clientX, y: event.clientY });
+    }, []);
+
+    const handleLinkToNode = useCallback(
+        (targetId: string) => {
+            if (!menu || menu.kind !== 'add-edge') {
+                return;
+            }
+            setEdges((eds) => {
+                if (eds.some((edge) => edge.source === menu.id && edge.target === targetId)) {
+                    return eds;
+                }
+                return addEdge(
+                    {
+                        id: generateId('edge'),
+                        source: menu.id,
+                        target: targetId,
+                        type: 'bezier',
+                    },
+                    eds
+                );
+            });
+            requestLayout();
+            setMenu(null);
+        },
+        [generateId, menu, requestLayout, setEdges]
+    );
+
+    const handleCreateAndLink = useCallback(
+        (templateKey: string) => {
+            if (!menu || menu.kind !== 'add-edge') {
+                return;
+            }
+            const sourceNode = nodes.find((node) => node.id === menu.id);
+            const basePosition = sourceNode?.position ?? { x: 120, y: 120 };
+            const position = { x: basePosition.x + 260, y: basePosition.y };
+            let newNode: Node<NodeData> | null = null;
+
+            if (templateKey === 'command') {
+                const command = window.prompt('Команда', '/start');
+                if (!command) {
+                    return;
+                }
+                newNode = {
+                    id: generateId('command'),
+                    type: 'command',
+                    position,
+                    data: { label: 'Команда', kind: 'command', commandText: command },
+                };
+            }
+
+            if (templateKey === 'message') {
+                const message = window.prompt('Сообщение', 'Привет');
+                if (!message) {
+                    return;
+                }
+                newNode = {
+                    id: generateId('message'),
+                    type: 'message',
+                    position,
+                    data: { label: 'Сообщение', kind: 'message', messageText: message },
+                };
+            }
+
+            if (templateKey === 'message_button') {
+                const text = window.prompt('Текст кнопки', 'Подробнее');
+                if (!text) {
+                    return;
+                }
+                newNode = {
+                    id: generateId('message_button'),
+                    type: 'message_button',
+                    position,
+                    data: { label: 'Message Button', kind: 'message_button', buttonText: text },
+                };
+            }
+
+            if (templateKey === 'reply_button') {
+                const text = window.prompt('Текст кнопки', 'Да');
+                if (!text) {
+                    return;
+                }
+                newNode = {
+                    id: generateId('reply_button'),
+                    type: 'reply_button',
+                    position,
+                    data: { label: 'Reply Button', kind: 'reply_button', buttonText: text },
+                };
+            }
+
+            if (!newNode) {
+                return;
+            }
+
+            setNodes((nds) => nds.concat(newNode));
+            setEdges((eds) =>
+                addEdge(
+                    {
+                        id: generateId('edge'),
+                        source: menu.id,
+                        target: newNode.id,
+                        type: 'bezier',
+                    },
+                    eds
+                )
+            );
+            requestLayout();
+            setMenu(null);
+        },
+        [generateId, menu, nodes, requestLayout, setEdges, setNodes]
+    );
+
+    const handlePaneClick = useCallback(() => {
+        if (suppressPaneClickRef.current) {
+            suppressPaneClickRef.current = false;
+            return;
+        }
+        setMenu(null);
+    }, []);
+
+    const handleEditCommand = useCallback(() => {
+        if (!menu || menu.kind !== 'node') {
+            return;
+        }
+        const currentNode = nodes.find((node) => node.id === menu.id);
+        if (!currentNode || currentNode.data.kind !== 'command') {
+            return;
+        }
+        const command = window.prompt('Команда', currentNode.data.commandText ?? '/start');
+        if (!command) {
+            return;
+        }
+        setNodes((nds) =>
+            nds.map((node) =>
+                node.id === menu.id ? { ...node, data: { ...node.data, commandText: command } } : node
+            )
+        );
+        setMenu(null);
+    }, [menu, nodes, setNodes]);
+
+    const handleEditMessage = useCallback(() => {
+        if (!menu || menu.kind !== 'node') {
+            return;
+        }
+        const currentNode = nodes.find((node) => node.id === menu.id);
+        if (!currentNode || currentNode.data.kind !== 'message') {
+            return;
+        }
+        const message = window.prompt('Сообщение', currentNode.data.messageText ?? 'Привет');
+        if (!message) {
+            return;
+        }
+        setNodes((nds) =>
+            nds.map((node) =>
+                node.id === menu.id ? { ...node, data: { ...node.data, messageText: message } } : node
+            )
+        );
+        setMenu(null);
+    }, [menu, nodes, setNodes]);
+
+    const handleEditButtonText = useCallback(() => {
+        if (!menu || menu.kind !== 'node') {
+            return;
+        }
+        const currentNode = nodes.find((node) => node.id === menu.id);
+        if (!currentNode) {
+            return;
+        }
+        if (currentNode.data.kind !== 'message_button' && currentNode.data.kind !== 'reply_button') {
+            return;
+        }
+        const text = window.prompt('Текст кнопки', currentNode.data.buttonText ?? 'Кнопка');
+        if (!text) {
+            return;
+        }
+        setNodes((nds) =>
+            nds.map((node) =>
+                node.id === menu.id ? { ...node, data: { ...node.data, buttonText: text } } : node
+            )
+        );
+        setMenu(null);
+    }, [menu, nodes, setNodes]);
+
+    const handleEditBotToken = useCallback(async () => {
+        if (!menu || menu.kind !== 'node' || !bot) {
+            return;
+        }
+        const token = window.prompt('Новый токен бота', bot.token ?? '');
+        if (token === null) {
+            return;
+        }
+        const response = await fetch(`${API_BASE}/bots/${bot.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: token || null }),
+        });
+        if (!response.ok) {
+            return;
+        }
+        const updated: Bot = await response.json();
+        setBot(updated);
+        applyBotToNode(updated);
+        setMenu(null);
+    }, [menu, bot, applyBotToNode]);
+
+    const handleDeleteNode = useCallback(() => {
+        if (!menu || menu.kind !== 'node') {
+            return;
+        }
+        setNodes((nds) => nds.filter((node) => node.id !== menu.id));
+        setEdges((eds) => eds.filter((edge) => edge.source !== menu.id && edge.target !== menu.id));
+        requestLayout();
+        setMenu(null);
+    }, [menu, requestLayout, setEdges, setNodes]);
+
+    const handleDeleteEdge = useCallback(() => {
+        if (!menu || menu.kind !== 'edge') {
+            return;
+        }
+        setEdges((eds) => eds.filter((edge) => edge.id !== menu.id));
+        requestLayout();
+        setMenu(null);
+    }, [menu, requestLayout, setEdges]);
+
+    const handleStartBot = useCallback(async () => {
+        if (!bot) {
+            return;
+        }
+        const commandNodes = nodes.filter((node) => node.data.kind === 'command');
+        const connectedCommands = new Set(edges.map((edge) => edge.source));
+        const disconnected = commandNodes.filter((node) => !connectedCommands.has(node.id));
+        if (disconnected.length) {
+            window.alert('Подключи каждую команду к следующей ноде (сообщение или блок).');
+            return;
+        }
+        const response = await fetch(`${API_BASE}/bots/${bot.id}/start`, { method: 'POST' });
+        if (!response.ok) {
+            return;
+        }
+        const updated: Bot = await response.json();
+        setBot(updated);
+        applyBotToNode(updated);
+    }, [bot, nodes, edges, applyBotToNode]);
+
+    const handleStopBot = useCallback(async () => {
+        if (!bot) {
+            return;
+        }
+        const response = await fetch(`${API_BASE}/bots/${bot.id}/stop`, { method: 'POST' });
+        if (!response.ok) {
+            return;
+        }
+        const updated: Bot = await response.json();
+        setBot(updated);
+        applyBotToNode(updated);
+    }, [bot, applyBotToNode]);
+
+    const handleSaveFlow = useCallback(async () => {
+        if (!bot) {
+            return;
+        }
+        await fetch(`${API_BASE}/bots/${bot.id}/flow`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nodes, edges }),
+        });
+    }, [bot, nodes, edges]);
+
+    const handleExport = useCallback(() => {
+        const payload = {
+            bot,
+            flow: { nodes, edges },
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'bot-workspace.json';
+        link.click();
+        URL.revokeObjectURL(url);
+    }, [bot, nodes, edges]);
+
+    const handleImport = useCallback(
+        async (file: File) => {
+            const text = await file.text();
+            const parsed = JSON.parse(text) as {
+                bot?: Bot;
+                flow?: { nodes?: Node<NodeData>[]; edges?: Edge[] };
+            };
+            if (parsed.flow?.nodes && parsed.flow?.edges) {
+                setNodes(parsed.flow.nodes);
+                setEdges(parsed.flow.edges);
+            }
+            if (parsed.bot && bot) {
+                const response = await fetch(`${API_BASE}/bots/${bot.id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: parsed.bot.name,
+                        token: parsed.bot.token ?? null,
+                        status: parsed.bot.status,
+                    }),
+                });
+                if (response.ok) {
+                    const updated: Bot = await response.json();
+                    setBot(updated);
+                    applyBotToNode(updated);
+                }
+            }
+        },
+        [bot, setEdges, setNodes, applyBotToNode, requestLayout]
+    );
+
+    const handleImportClick = useCallback(() => {
+        fileInputRef.current?.click();
+    }, []);
+
+    useEffect(() => {
+        let isMounted = true;
+        const load = async () => {
+            setIsHydrating(true);
+            const storedId = window.localStorage.getItem('botId');
+            const getBot = async (id: string) => {
+                const response = await fetch(`${API_BASE}/bots/${id}`);
+                if (!response.ok) {
+                    return null;
+                }
+                return (await response.json()) as Bot;
+            };
+            let currentBot = storedId ? await getBot(storedId) : null;
+            if (!currentBot) {
+                const listResponse = await fetch(`${API_BASE}/bots`);
+                const list: Bot[] = listResponse.ok ? await listResponse.json() : [];
+                currentBot = list[0] ?? null;
+            }
+            if (!currentBot) {
+                const createResponse = await fetch(`${API_BASE}/bots`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: 'Main Bot' }),
+                });
+                if (createResponse.ok) {
+                    currentBot = await createResponse.json();
+                }
+            }
+            if (!isMounted || !currentBot) {
+                setIsHydrating(false);
+                return;
+            }
+            window.localStorage.setItem('botId', currentBot.id);
+            setBot(currentBot);
+            setNodes(currentBot.flow.nodes ?? []);
+            setEdges(currentBot.flow.edges ?? []);
+            applyBotToNode(currentBot);
+            setIsHydrating(false);
+        };
+        load();
+        return () => {
+            isMounted = false;
+        };
+    }, [applyBotToNode, requestLayout, setEdges, setNodes]);
+
+    useEffect(() => {
+        if (isHydrating || !bot) {
+            return undefined;
+        }
+        if (saveTimerRef.current) {
+            window.clearTimeout(saveTimerRef.current);
+        }
+        saveTimerRef.current = window.setTimeout(() => {
+            handleSaveFlow();
+        }, 800);
+        return () => {
+            if (saveTimerRef.current) {
+                window.clearTimeout(saveTimerRef.current);
+            }
+        };
+    }, [bot, nodes, edges, handleSaveFlow, isHydrating]);
+
+    useEffect(() => {
+        setNodes((nds) => {
+            const sources = new Set(edges.map((edge) => edge.source));
+            let changed = false;
+            const next = nds.map((node) => {
+                const canAddChild = node.data.kind === 'message' || !sources.has(node.id);
+                if (node.data.canAddChild === canAddChild) {
+                    return node;
+                }
+                changed = true;
+                return { ...node, data: { ...node.data, canAddChild } };
+            });
+            return changed ? next : nds;
+        });
+    }, [edges, setNodes]);
+
+    useEffect(() => {
+        if (!layoutRequested) {
+            return;
+        }
+        setNodes((nds) => {
+            const positions = layoutTree(nds, edges);
+            let changed = false;
+            const next = nds.map((node) => {
+                const nextPosition = positions.get(node.id) ?? node.position;
+                const samePosition = node.position.x === nextPosition.x && node.position.y === nextPosition.y;
+                if (!samePosition) {
+                    changed = true;
+                    return {
+                        ...node,
+                        position: nextPosition,
+                    };
+                }
+                return node;
+            });
+            return changed ? next : nds;
+        });
+        setLayoutRequested(false);
+    }, [edges, layoutRequested, setNodes]);
+
+    const currentNode = menu?.kind === 'node' ? nodes.find((node) => node.id === menu.id) ?? null : null;
+    const linkCandidates = useMemo(() => {
+        if (!menu || menu.kind !== 'add-edge') {
+            return [];
+        }
+        const sourceNode = nodes.find((node) => node.id === menu.id);
+        const sourceKind = sourceNode?.data.kind;
+        const connectedTargets = new Set(edges.filter((edge) => edge.source === menu.id).map((edge) => edge.target));
+        let candidates = nodes.filter((node) => node.id !== menu.id && !connectedTargets.has(node.id));
+        if (sourceKind === 'message') {
+            candidates = candidates.filter(
+                (node) => node.data.kind === 'message_button' || node.data.kind === 'reply_button'
+            );
+        }
+        if (sourceKind === 'message_button' || sourceKind === 'reply_button') {
+            candidates = candidates.filter((node) => node.data.kind === 'message');
+        }
+        const items = candidates
+            .map((node) => ({
+                id: node.id,
+                title: getNodeTitle(node),
+                subtitle: getNodeSubtitle(node),
+            }));
+        if (!linkSearch.trim()) {
+            return items;
+        }
+        const needle = linkSearch.toLowerCase();
+        return items.filter((item) => `${item.title} ${item.subtitle}`.toLowerCase().includes(needle));
+    }, [menu, nodes, edges, linkSearch]);
+
+    const createTemplates = useMemo(
+        () => [
+            { key: 'command', label: 'Команда', description: 'Команда бота' },
+            { key: 'message', label: 'Сообщение', description: 'Ответ пользователю' },
+            { key: 'message_button', label: 'Message Button', description: 'Инлайн кнопка' },
+            { key: 'reply_button', label: 'Reply Button', description: 'Ответная кнопка' },
+        ],
+        []
+    );
+
+    const filteredCreateTemplates = useMemo(() => {
+        const sourceNode = menu?.kind === 'add-edge' ? nodes.find((node) => node.id === menu.id) : null;
+        const sourceKind = sourceNode?.data.kind;
+        let templates = createTemplates;
+        if (sourceKind === 'message') {
+            templates = createTemplates.filter(
+                (item) => item.key === 'message_button' || item.key === 'reply_button'
+            );
+        }
+        if (sourceKind === 'command') {
+            templates = createTemplates.filter((item) => item.key === 'message');
+        }
+        if (sourceKind === 'message_button' || sourceKind === 'reply_button') {
+            templates = createTemplates.filter((item) => item.key === 'message');
+        }
+        if (!linkSearch.trim()) {
+            return templates;
+        }
+        const needle = linkSearch.toLowerCase();
+        return templates.filter((item) => `${item.label} ${item.description}`.toLowerCase().includes(needle));
+    }, [createTemplates, linkSearch, menu, nodes]);
+
+    const nodeTemplates = useMemo(
+        () => [
+            { key: 'command', label: 'Команда', description: 'Команда бота', action: handleAddCommandNode },
+            { key: 'message', label: 'Сообщение', description: 'Ответ пользователю', action: handleAddMessageNode },
+            { key: 'message_button', label: 'Message Button', description: 'Инлайн кнопка', action: handleAddMessageButtonNode },
+            { key: 'reply_button', label: 'Reply Button', description: 'Ответная кнопка', action: handleAddReplyButtonNode },
+            { key: 'bot', label: 'Бот', description: 'Токен и статус', action: handleAddBot },
+        ],
+        [handleAddBot, handleAddCommandNode, handleAddMessageNode, handleAddMessageButtonNode, handleAddReplyButtonNode]
+    );
+
+    const filteredTemplates = nodeTemplates.filter((item) => {
+        if (!searchTerm.trim()) {
+            return true;
+        }
+        const needle = searchTerm.toLowerCase();
+        return `${item.label} ${item.description}`.toLowerCase().includes(needle);
+    });
+
+    return (
+        <>
+            <Head title="Welcome">
+                <link rel="preconnect" href="https://fonts.googleapis.com" />
+                <link rel="preconnect" href="https://fonts.gstatic.com" />
+                <link
+                    href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+                    rel="stylesheet"
+                />
+            </Head>
+            <div className="relative flex h-screen flex-col overflow-hidden bg-[#f4f4ef] font-['Space_Grotesk'] text-slate-900">
+                <div className="pointer-events-none absolute -left-32 top-16 h-72 w-72 rounded-full bg-[#ffd166]/40 blur-[90px]" />
+                <div className="pointer-events-none absolute right-[-80px] top-[-40px] h-80 w-80 rounded-full bg-[#6ee7b7]/40 blur-[110px]" />
+                <div className="pointer-events-none absolute bottom-[-120px] left-[40%] h-96 w-96 rounded-full bg-[#60a5fa]/30 blur-[120px]" />
+
+                <AppNavbar onSave={handleSaveFlow} onExport={handleExport} onImport={handleImportClick} />
+                <div className="flex flex-1 overflow-hidden">
+                    <Sidebar
+                        searchTerm={searchTerm}
+                        onSearchChange={setSearchTerm}
+                        templates={filteredTemplates}
+                        statusLabel={`Статус: ${bot?.status ?? 'stopped'}`}
+                    />
+                    <BotActionsContext.Provider value={{ onStart: handleStartBot, onStop: handleStopBot }}>
+                        <AddEdgeMenuContext.Provider value={{ onOpenAddMenu: handleOpenAddMenu }}>
+                            <main className="relative flex-1">
+                                <NodeContextMenu
+                                    menu={menu}
+                                    currentNode={currentNode}
+                                    linkCandidates={linkCandidates}
+                                    createTemplates={filteredCreateTemplates}
+                                    linkSearch={linkSearch}
+                                    onLinkSearchChange={(value) => setLinkSearch(value)}
+                                    onLinkToNode={handleLinkToNode}
+                                    onCreateAndLink={handleCreateAndLink}
+                                    onEditCommand={handleEditCommand}
+                                    onEditMessage={handleEditMessage}
+                                    onEditButtonText={handleEditButtonText}
+                                    onEditBotToken={handleEditBotToken}
+                                    onDeleteNode={handleDeleteNode}
+                                    onDeleteEdge={handleDeleteEdge}
+                                />
+                                <ReactFlow
+                                    nodes={nodes}
+                                    edges={edges}
+                                    nodeTypes={nodeTypes}
+                                    onNodesChange={handleNodesChange}
+                                    onEdgesChange={handleEdgesChange}
+                                    onConnect={onConnect}
+                                    onConnectStart={handleConnectStart}
+                                    onConnectEnd={handleConnectEnd}
+                                    onPaneClick={handlePaneClick}
+                                    onNodeContextMenu={handleNodeContextMenu}
+                                    onEdgeContextMenu={handleEdgeContextMenu}
+                                    connectionLineType={ConnectionLineType.Bezier}
+                                    defaultEdgeOptions={{ type: 'bezier', style: { strokeWidth: 2.5 } }}
+                                    fitView
+                                >
+                                    <Background gap={20} size={1} color="#e2e8f0" />
+                                    <Controls />
+                                </ReactFlow>
+                            </main>
+                        </AddEdgeMenuContext.Provider>
+                    </BotActionsContext.Provider>
+                </div>
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="application/json"
+                    className="hidden"
+                    onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) {
+                            handleImport(file).catch(() => undefined);
+                        }
+                        event.target.value = '';
+                    }}
+                />
+            </div>
+        </>
+    );
+}
