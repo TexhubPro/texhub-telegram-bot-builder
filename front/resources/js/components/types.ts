@@ -1,4 +1,12 @@
-export type NodeKind = 'bot' | 'command' | 'message' | 'message_button' | 'reply_button' | 'node';
+export type NodeKind =
+    | 'bot'
+    | 'command'
+    | 'message'
+    | 'message_button'
+    | 'reply_button'
+    | 'button_row'
+    | 'image'
+    | 'node';
 
 export type NodeData = {
     label: string;
@@ -10,6 +18,7 @@ export type NodeData = {
     commandText?: string;
     messageText?: string;
     buttonText?: string;
+    imageUrls?: string[];
     canAddChild?: boolean;
 };
 

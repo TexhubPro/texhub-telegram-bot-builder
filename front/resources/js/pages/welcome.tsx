@@ -16,8 +16,10 @@ import { AppNavbar } from '../components/layout/navbar';
 import { AddEdgeMenuContext } from '../components/nodes/add-edge-context';
 import { BotActionsContext } from '../components/nodes/bot-actions-context';
 import { BotNode } from '../components/nodes/bot-node';
+import { ButtonRowNode } from '../components/nodes/button-row-node';
 import { CommandNode } from '../components/nodes/command-node';
 import { NodeContextMenu } from '../components/nodes/context-menu';
+import { ImageNode } from '../components/nodes/image-node';
 import { MessageButtonNode } from '../components/nodes/message-button-node';
 import { MessageNode } from '../components/nodes/message-node';
 import { ReplyButtonNode } from '../components/nodes/reply-button-node';
@@ -36,6 +38,8 @@ const NODE_KIND_LABELS: Record<NodeKind, string> = {
     message: 'Сообщение',
     message_button: 'Message Button',
     reply_button: 'Reply Button',
+    button_row: 'Rows',
+    image: 'Изображения',
     node: 'Блок',
 };
 
@@ -126,6 +130,12 @@ const getNodeTitle = (node: Node<NodeData>) => {
         case 'message_button':
         case 'reply_button':
             return node.data.buttonText ?? node.data.label;
+        case 'button_row':
+            return node.data.label ?? 'Rows';
+        case 'image': {
+            const count = node.data.imageUrls?.length ?? 0;
+            return count ? `Изображения (${count})` : 'Изображения';
+        }
         default:
             return node.data.label;
     }
@@ -163,6 +173,8 @@ export default function Welcome() {
             message: MessageNode,
             message_button: MessageButtonNode,
             reply_button: ReplyButtonNode,
+            button_row: ButtonRowNode,
+            image: ImageNode,
             bot: BotNode,
         }),
         []
@@ -272,6 +284,32 @@ export default function Welcome() {
             type: 'message',
             position: { x: 420, y: 180 },
             data: { label: 'Сообщение', kind: 'message', messageText: message },
+        });
+    }, [addNode, generateId]);
+
+    const handleAddRowNode = useCallback(() => {
+        addNode({
+            id: generateId('row'),
+            type: 'button_row',
+            position: { x: 520, y: 200 },
+            data: { label: 'Row', kind: 'button_row' },
+        });
+    }, [addNode, generateId]);
+
+    const handleAddImageNode = useCallback(() => {
+        const raw = window.prompt('Ссылки на изображения (через запятую или с новой строки)', '');
+        if (raw === null) {
+            return;
+        }
+        const imageUrls = raw
+            .split(/[\n,]+/g)
+            .map((item) => item.trim())
+            .filter(Boolean);
+        addNode({
+            id: generateId('image'),
+            type: 'image',
+            position: { x: 520, y: 220 },
+            data: { label: 'Изображения', kind: 'image', imageUrls },
         });
     }, [addNode, generateId]);
 
@@ -444,6 +482,32 @@ export default function Welcome() {
                 };
             }
 
+            if (templateKey === 'button_row') {
+                newNode = {
+                    id: generateId('row'),
+                    type: 'button_row',
+                    position,
+                    data: { label: 'Row', kind: 'button_row' },
+                };
+            }
+
+            if (templateKey === 'image') {
+                const raw = window.prompt('Ссылки на изображения (через запятую или с новой строки)', '');
+                if (raw === null) {
+                    return;
+                }
+                const imageUrls = raw
+                    .split(/[\n,]+/g)
+                    .map((item) => item.trim())
+                    .filter(Boolean);
+                newNode = {
+                    id: generateId('image'),
+                    type: 'image',
+                    position,
+                    data: { label: 'Изображения', kind: 'image', imageUrls },
+                };
+            }
+
             if (!newNode) {
                 return;
             }
@@ -537,6 +601,31 @@ export default function Welcome() {
         setMenu(null);
     }, [menu, nodes, setNodes]);
 
+    const handleEditImageList = useCallback(() => {
+        if (!menu || menu.kind !== 'node') {
+            return;
+        }
+        const currentNode = nodes.find((node) => node.id === menu.id);
+        if (!currentNode || currentNode.data.kind !== 'image') {
+            return;
+        }
+        const currentList = currentNode.data.imageUrls ?? [];
+        const raw = window.prompt('Ссылки на изображения (через запятую или с новой строки)', currentList.join('\n'));
+        if (raw === null) {
+            return;
+        }
+        const imageUrls = raw
+            .split(/[\n,]+/g)
+            .map((item) => item.trim())
+            .filter(Boolean);
+        setNodes((nds) =>
+            nds.map((node) =>
+                node.id === menu.id ? { ...node, data: { ...node.data, imageUrls } } : node
+            )
+        );
+        setMenu(null);
+    }, [menu, nodes, setNodes]);
+
     const handleEditBotToken = useCallback(async () => {
         if (!menu || menu.kind !== 'node' || !bot) {
             return;
@@ -583,10 +672,18 @@ export default function Welcome() {
             return;
         }
         const commandNodes = nodes.filter((node) => node.data.kind === 'command');
-        const connectedCommands = new Set(edges.map((edge) => edge.source));
+        const nodesById = new Map(nodes.map((node) => [node.id, node]));
+        const connectedCommands = new Set(
+            edges
+                .filter((edge) => {
+                    const target = nodesById.get(edge.target);
+                    return target?.data.kind === 'message' || target?.data.kind === 'image';
+                })
+                .map((edge) => edge.source)
+        );
         const disconnected = commandNodes.filter((node) => !connectedCommands.has(node.id));
         if (disconnected.length) {
-            window.alert('Подключи каждую команду к следующей ноде (сообщение или блок).');
+            window.alert('Подключи каждую команду к следующей ноде (сообщение или изображения).');
             return;
         }
         const response = await fetch(`${API_BASE}/bots/${bot.id}/start`, { method: 'POST' });
@@ -738,7 +835,11 @@ export default function Welcome() {
             const sources = new Set(edges.map((edge) => edge.source));
             let changed = false;
             const next = nds.map((node) => {
-                const canAddChild = node.data.kind === 'message' || !sources.has(node.id);
+                const canAddChild =
+                    node.data.kind === 'message' ||
+                    node.data.kind === 'image' ||
+                    node.data.kind === 'button_row' ||
+                    !sources.has(node.id);
                 if (node.data.canAddChild === canAddChild) {
                     return node;
                 }
@@ -778,23 +879,47 @@ export default function Welcome() {
         if (!menu || menu.kind !== 'add-edge') {
             return [];
         }
-        const sourceNode = nodes.find((node) => node.id === menu.id);
-        const sourceKind = sourceNode?.data.kind;
-        const connectedTargets = new Set(edges.filter((edge) => edge.source === menu.id).map((edge) => edge.target));
-        let candidates = nodes.filter((node) => node.id !== menu.id && !connectedTargets.has(node.id));
-        if (sourceKind === 'message') {
-            candidates = candidates.filter(
-                (node) => node.data.kind === 'message_button' || node.data.kind === 'reply_button'
-            );
-        }
-        if (sourceKind === 'message_button' || sourceKind === 'reply_button') {
-            candidates = candidates.filter((node) => node.data.kind === 'message');
-        }
-        const items = candidates
-            .map((node) => ({
-                id: node.id,
-                title: getNodeTitle(node),
-                subtitle: getNodeSubtitle(node),
+            const sourceNode = nodes.find((node) => node.id === menu.id);
+            const sourceKind = sourceNode?.data.kind;
+            const connectedTargets = new Set(edges.filter((edge) => edge.source === menu.id).map((edge) => edge.target));
+            let candidates = nodes.filter((node) => node.id !== menu.id && !connectedTargets.has(node.id));
+            if (sourceKind === 'message') {
+                candidates = candidates.filter(
+                    (node) =>
+                        node.data.kind === 'message_button' ||
+                        node.data.kind === 'reply_button' ||
+                        node.data.kind === 'button_row' ||
+                        node.data.kind === 'image'
+                );
+            }
+            if (sourceKind === 'message_button' || sourceKind === 'reply_button') {
+                candidates = candidates.filter(
+                    (node) => node.data.kind === 'message' || node.data.kind === 'image'
+                );
+            }
+            if (sourceKind === 'command') {
+                candidates = candidates.filter(
+                    (node) => node.data.kind === 'message' || node.data.kind === 'image'
+                );
+            }
+            if (sourceKind === 'image') {
+                candidates = candidates.filter(
+                    (node) =>
+                        node.data.kind === 'message_button' ||
+                        node.data.kind === 'reply_button' ||
+                        node.data.kind === 'button_row'
+                );
+            }
+            if (sourceKind === 'button_row') {
+                candidates = candidates.filter(
+                    (node) => node.data.kind === 'message_button' || node.data.kind === 'reply_button'
+                );
+            }
+            const items = candidates
+                .map((node) => ({
+                    id: node.id,
+                    title: getNodeTitle(node),
+                    subtitle: getNodeSubtitle(node),
             }));
         if (!linkSearch.trim()) {
             return items;
@@ -807,8 +932,10 @@ export default function Welcome() {
         () => [
             { key: 'command', label: 'Команда', description: 'Команда бота' },
             { key: 'message', label: 'Сообщение', description: 'Ответ пользователю' },
+            { key: 'button_row', label: 'Rows', description: 'Строка кнопок' },
             { key: 'message_button', label: 'Message Button', description: 'Инлайн кнопка' },
             { key: 'reply_button', label: 'Reply Button', description: 'Ответная кнопка' },
+            { key: 'image', label: 'Изображения', description: 'Один или больше файлов' },
         ],
         []
     );
@@ -819,14 +946,29 @@ export default function Welcome() {
         let templates = createTemplates;
         if (sourceKind === 'message') {
             templates = createTemplates.filter(
-                (item) => item.key === 'message_button' || item.key === 'reply_button'
+                (item) =>
+                    item.key === 'message_button' ||
+                    item.key === 'reply_button' ||
+                    item.key === 'button_row' ||
+                    item.key === 'image'
             );
         }
         if (sourceKind === 'command') {
-            templates = createTemplates.filter((item) => item.key === 'message');
+            templates = createTemplates.filter((item) => item.key === 'message' || item.key === 'image');
         }
         if (sourceKind === 'message_button' || sourceKind === 'reply_button') {
-            templates = createTemplates.filter((item) => item.key === 'message');
+            templates = createTemplates.filter((item) => item.key === 'message' || item.key === 'image');
+        }
+        if (sourceKind === 'image') {
+            templates = createTemplates.filter(
+                (item) =>
+                    item.key === 'message_button' || item.key === 'reply_button' || item.key === 'button_row'
+            );
+        }
+        if (sourceKind === 'button_row') {
+            templates = createTemplates.filter(
+                (item) => item.key === 'message_button' || item.key === 'reply_button'
+            );
         }
         if (!linkSearch.trim()) {
             return templates;
@@ -839,11 +981,21 @@ export default function Welcome() {
         () => [
             { key: 'command', label: 'Команда', description: 'Команда бота', action: handleAddCommandNode },
             { key: 'message', label: 'Сообщение', description: 'Ответ пользователю', action: handleAddMessageNode },
+            { key: 'button_row', label: 'Rows', description: 'Строка кнопок', action: handleAddRowNode },
             { key: 'message_button', label: 'Message Button', description: 'Инлайн кнопка', action: handleAddMessageButtonNode },
             { key: 'reply_button', label: 'Reply Button', description: 'Ответная кнопка', action: handleAddReplyButtonNode },
+            { key: 'image', label: 'Изображения', description: 'Один или больше файлов', action: handleAddImageNode },
             { key: 'bot', label: 'Бот', description: 'Токен и статус', action: handleAddBot },
         ],
-        [handleAddBot, handleAddCommandNode, handleAddMessageNode, handleAddMessageButtonNode, handleAddReplyButtonNode]
+        [
+            handleAddBot,
+            handleAddCommandNode,
+            handleAddMessageNode,
+            handleAddRowNode,
+            handleAddMessageButtonNode,
+            handleAddReplyButtonNode,
+            handleAddImageNode,
+        ]
     );
 
     const filteredTemplates = nodeTemplates.filter((item) => {
@@ -892,6 +1044,7 @@ export default function Welcome() {
                                     onEditCommand={handleEditCommand}
                                     onEditMessage={handleEditMessage}
                                     onEditButtonText={handleEditButtonText}
+                                    onEditImageList={handleEditImageList}
                                     onEditBotToken={handleEditBotToken}
                                     onDeleteNode={handleDeleteNode}
                                     onDeleteEdge={handleDeleteEdge}

@@ -14,6 +14,7 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputMediaPhoto,
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
@@ -135,18 +136,18 @@ def extract_command_routes(flow: Flow) -> List[Tuple[str, str]]:
         command = command_text.lstrip("/").strip().lower()
         if not command:
             continue
-        message_node = None
+        target_node = None
         for edge in flow.edges:
             if edge.get("source") == node.get("id"):
-                target_node = nodes_by_id.get(edge.get("target"))
-                if not target_node:
+                candidate = nodes_by_id.get(edge.get("target"))
+                if not candidate:
                     continue
-                target_data = target_node.get("data", {})
-                if target_data.get("kind") == "message":
-                    message_node = target_node
+                candidate_kind = candidate.get("data", {}).get("kind")
+                if candidate_kind in ("message", "image"):
+                    target_node = candidate
                     break
-        if message_node:
-            routes.append((command, message_node.get("id") or ""))
+        if target_node:
+            routes.append((command, target_node.get("id") or ""))
     return routes
 
 
@@ -162,7 +163,7 @@ def normalize_command(text: str) -> str:
     return value.lower()
 
 
-def find_message_node_for_command(flow: Flow, command: str) -> Optional[dict]:
+def find_target_node_for_command(flow: Flow, command: str) -> Optional[dict]:
     command_lower = command.lower()
     routes = extract_command_routes(flow)
     nodes_by_id = {node.get("id"): node for node in flow.nodes}
@@ -172,7 +173,7 @@ def find_message_node_for_command(flow: Flow, command: str) -> Optional[dict]:
     return None
 
 
-def find_message_target_from_source(flow: Flow, source_id: str) -> Optional[dict]:
+def find_content_target_from_source(flow: Flow, source_id: str) -> Optional[dict]:
     nodes_by_id = {node.get("id"): node for node in flow.nodes}
     for edge in flow.edges:
         if edge.get("source") != source_id:
@@ -181,7 +182,7 @@ def find_message_target_from_source(flow: Flow, source_id: str) -> Optional[dict
         if not target_node:
             continue
         target_data = target_node.get("data", {})
-        if target_data.get("kind") == "message":
+        if target_data.get("kind") in ("message", "image"):
             return target_node
     return None
 
@@ -200,46 +201,119 @@ def find_reply_button_by_text(flow: Flow, text: str) -> Optional[dict]:
     return None
 
 
-def build_reply_markup(flow: Flow, message_node_id: str):
+def collect_button_rows(flow: Flow, content_node_id: str) -> Tuple[List[List[dict]], List[List[dict]]]:
     nodes_by_id = {node.get("id"): node for node in flow.nodes}
-    inline_buttons: List[Tuple[str, str]] = []
-    reply_buttons: List[str] = []
+    row_edges = [edge for edge in flow.edges if edge.get("source") == content_node_id]
+    row_nodes = []
+    direct_buttons = []
+    for edge in row_edges:
+        target_node = nodes_by_id.get(edge.get("target"))
+        if not target_node:
+            continue
+        kind = target_node.get("data", {}).get("kind")
+        if kind == "button_row":
+            row_nodes.append(target_node)
+        elif kind in ("message_button", "reply_button"):
+            direct_buttons.append(target_node)
+
+    inline_rows: List[List[dict]] = []
+    reply_rows: List[List[dict]] = []
+
+    if row_nodes:
+        for row_node in row_nodes:
+            row_buttons = [
+                nodes_by_id.get(edge.get("target"))
+                for edge in flow.edges
+                if edge.get("source") == row_node.get("id")
+            ]
+            row_buttons = [btn for btn in row_buttons if btn]
+            inline = [btn for btn in row_buttons if btn.get("data", {}).get("kind") == "message_button"]
+            reply = [btn for btn in row_buttons if btn.get("data", {}).get("kind") == "reply_button"]
+            if inline:
+                inline_rows.append(inline)
+            if reply:
+                reply_rows.append(reply)
+    else:
+        for btn in direct_buttons:
+            kind = btn.get("data", {}).get("kind")
+            if kind == "message_button":
+                inline_rows.append([btn])
+            elif kind == "reply_button":
+                reply_rows.append([btn])
+
+    return inline_rows, reply_rows
+
+
+def build_reply_markup(flow: Flow, content_node_id: str):
+    nodes_by_id = {node.get("id"): node for node in flow.nodes}
+    inline_rows, reply_rows = collect_button_rows(flow, content_node_id)
+
+    if inline_rows:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text=(btn.get("data", {}).get("buttonText") or btn.get("data", {}).get("label") or "").strip(),
+                        callback_data=f"btn:{btn.get('id') or ''}"[:64],
+                    )
+                    for btn in row
+                    if (btn.get("data", {}).get("buttonText") or btn.get("data", {}).get("label") or "").strip()
+                ]
+                for row in inline_rows
+            ]
+        )
+
+    if reply_rows:
+        return ReplyKeyboardMarkup(
+            keyboard=[
+                [
+                    KeyboardButton(
+                        text=(btn.get("data", {}).get("buttonText") or btn.get("data", {}).get("label") or "").strip()
+                    )
+                    for btn in row
+                    if (btn.get("data", {}).get("buttonText") or btn.get("data", {}).get("label") or "").strip()
+                ]
+                for row in reply_rows
+            ],
+            resize_keyboard=True,
+        )
+
+    return None
+
+
+def collect_image_urls(flow: Flow, source_id: str) -> List[str]:
+    nodes_by_id = {node.get("id"): node for node in flow.nodes}
+    urls: List[str] = []
     for edge in flow.edges:
-        if edge.get("source") != message_node_id:
+        if edge.get("source") != source_id:
             continue
         target_node = nodes_by_id.get(edge.get("target"))
         if not target_node:
             continue
         target_data = target_node.get("data", {})
-        kind = target_data.get("kind")
-        button_text = (target_data.get("buttonText") or target_data.get("label") or "").strip()
-        if not button_text:
+        if target_data.get("kind") != "image":
             continue
-        if kind == "message_button":
-            inline_buttons.append((button_text, target_node.get("id") or ""))
-        elif kind == "reply_button":
-            reply_buttons.append(button_text)
+        image_list = target_data.get("imageUrls") or []
+        for item in image_list:
+            if isinstance(item, str) and item.strip():
+                urls.append(item.strip())
+    return urls
 
-    if inline_buttons:
-        return InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text=text,
-                        callback_data=f"btn:{node_id}"[:64],
-                    )
-                ]
-                for text, node_id in inline_buttons
-            ]
-        )
 
-    if reply_buttons:
-        return ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text=text)] for text in reply_buttons],
-            resize_keyboard=True,
-        )
-
-    return None
+async def send_images(message: Message, urls: List[str], caption: str = "", reply_markup=None) -> bool:
+    if not urls:
+        return False
+    if len(urls) == 1:
+        await message.answer_photo(urls[0], caption=caption or None, reply_markup=reply_markup)
+        return True
+    media = []
+    for idx, url in enumerate(urls):
+        if idx == 0 and caption:
+            media.append(InputMediaPhoto(media=url, caption=caption))
+        else:
+            media.append(InputMediaPhoto(media=url))
+    await message.answer_media_group(media)
+    return True
 
 
 async def run_bot_polling(bot: Bot) -> None:
@@ -252,24 +326,51 @@ async def run_bot_polling(bot: Bot) -> None:
         command = normalize_command(message.text)
         flow = FLOW_CACHE.get(bot.id) or bot.flow
         if command:
-            message_node = find_message_node_for_command(flow, command)
-            if message_node:
-                data = message_node.get("data", {})
-                message_text = (data.get("messageText") or "").strip()
-                if not message_text:
+            target_node = find_target_node_for_command(flow, command)
+            if target_node:
+                data = target_node.get("data", {})
+                kind = data.get("kind")
+                if kind == "image":
+                    urls = data.get("imageUrls") or []
+                    reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+                    await send_images(message, urls, reply_markup=reply_markup)
                     return
-                reply_markup = build_reply_markup(flow, message_node.get("id") or "")
-                await message.answer(message_text, reply_markup=reply_markup)
+                message_text = (data.get("messageText") or "").strip()
+                image_urls = collect_image_urls(flow, target_node.get("id") or "")
+                reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+                if image_urls:
+                    sent = await send_images(message, image_urls, caption=message_text, reply_markup=reply_markup)
+                    if message_text and not sent:
+                        await message.answer(message_text, reply_markup=reply_markup)
+                    elif message_text and len(image_urls) > 1:
+                        await message.answer(message_text, reply_markup=reply_markup)
+                else:
+                    if message_text:
+                        await message.answer(message_text, reply_markup=reply_markup)
             return
         reply_button = find_reply_button_by_text(flow, message.text)
         if reply_button:
-            target_message = find_message_target_from_source(flow, reply_button.get("id") or "")
-            if target_message:
-                payload = target_message.get("data", {})
+            target_node = find_content_target_from_source(flow, reply_button.get("id") or "")
+            if target_node:
+                payload = target_node.get("data", {})
+                kind = payload.get("kind")
+                if kind == "image":
+                    urls = payload.get("imageUrls") or []
+                    reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+                    await send_images(message, urls, reply_markup=reply_markup)
+                    return
                 message_text = (payload.get("messageText") or "").strip()
-                if message_text:
-                    reply_markup = build_reply_markup(flow, target_message.get("id") or "")
-                    await message.answer(message_text, reply_markup=reply_markup)
+                image_urls = collect_image_urls(flow, target_node.get("id") or "")
+                reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+                if image_urls:
+                    sent = await send_images(message, image_urls, caption=message_text, reply_markup=reply_markup)
+                    if message_text and not sent:
+                        await message.answer(message_text, reply_markup=reply_markup)
+                    elif message_text and len(image_urls) > 1:
+                        await message.answer(message_text, reply_markup=reply_markup)
+                else:
+                    if message_text:
+                        await message.answer(message_text, reply_markup=reply_markup)
 
     dispatcher.message()(handler)
 
@@ -283,26 +384,54 @@ async def run_bot_polling(bot: Bot) -> None:
         flow = FLOW_CACHE.get(bot.id) or bot.flow
         if data.startswith("btn:"):
             button_id = data[4:]
-            target_message = find_message_target_from_source(flow, button_id)
-            if target_message:
-                payload = target_message.get("data", {})
-                message_text = (payload.get("messageText") or "").strip()
-                if message_text:
-                    reply_markup = build_reply_markup(flow, target_message.get("id") or "")
-                    await query.message.answer(message_text, reply_markup=reply_markup)
+            target_node = find_content_target_from_source(flow, button_id)
+            if target_node:
+                payload = target_node.get("data", {})
+                kind = payload.get("kind")
+                if kind == "image":
+                    urls = payload.get("imageUrls") or []
+                    reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+                    await send_images(query.message, urls, reply_markup=reply_markup)
                     return
+                message_text = (payload.get("messageText") or "").strip()
+                image_urls = collect_image_urls(flow, target_node.get("id") or "")
+                reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+                if image_urls:
+                    sent = await send_images(query.message, image_urls, caption=message_text, reply_markup=reply_markup)
+                    if message_text and not sent:
+                        await query.message.answer(message_text, reply_markup=reply_markup)
+                    elif message_text and len(image_urls) > 1:
+                        await query.message.answer(message_text, reply_markup=reply_markup)
+                else:
+                    if message_text:
+                        await query.message.answer(message_text, reply_markup=reply_markup)
+                return
         if data.startswith("/"):
             flow = FLOW_CACHE.get(bot.id) or bot.flow
             command = normalize_command(data)
             if command:
-                message_node = find_message_node_for_command(flow, command)
-                if message_node:
-                    payload = message_node.get("data", {})
-                    message_text = (payload.get("messageText") or "").strip()
-                    if message_text:
-                        reply_markup = build_reply_markup(flow, message_node.get("id") or "")
-                        await query.message.answer(message_text, reply_markup=reply_markup)
+                target_node = find_target_node_for_command(flow, command)
+                if target_node:
+                    payload = target_node.get("data", {})
+                    kind = payload.get("kind")
+                    if kind == "image":
+                        urls = payload.get("imageUrls") or []
+                        reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+                        await send_images(query.message, urls, reply_markup=reply_markup)
                         return
+                    message_text = (payload.get("messageText") or "").strip()
+                    image_urls = collect_image_urls(flow, target_node.get("id") or "")
+                    reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+                    if image_urls:
+                        sent = await send_images(query.message, image_urls, caption=message_text, reply_markup=reply_markup)
+                        if message_text and not sent:
+                            await query.message.answer(message_text, reply_markup=reply_markup)
+                        elif message_text and len(image_urls) > 1:
+                            await query.message.answer(message_text, reply_markup=reply_markup)
+                    else:
+                        if message_text:
+                            await query.message.answer(message_text, reply_markup=reply_markup)
+                    return
         await query.message.answer(data)
 
     dispatcher.callback_query()(callback_handler)

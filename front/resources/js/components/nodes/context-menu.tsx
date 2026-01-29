@@ -25,6 +25,7 @@ type Props = {
     onEditCommand: () => void;
     onEditMessage: () => void;
     onEditButtonText: () => void;
+    onEditImageList: () => void;
     onEditBotToken: () => void;
     onDeleteNode: () => void;
     onDeleteEdge: () => void;
@@ -42,6 +43,7 @@ export function NodeContextMenu({
     onEditCommand,
     onEditMessage,
     onEditButtonText,
+    onEditImageList,
     onEditBotToken,
     onDeleteNode,
     onDeleteEdge,
@@ -55,6 +57,7 @@ export function NodeContextMenu({
     const isBotNode = currentNode?.data.kind === 'bot';
     const isButtonNode =
         currentNode?.data.kind === 'message_button' || currentNode?.data.kind === 'reply_button';
+    const isImageNode = currentNode?.data.kind === 'image';
 
     return (
         <div
@@ -128,6 +131,11 @@ export function NodeContextMenu({
                     {isButtonNode ? (
                         <Button size="sm" variant="flat" onPress={onEditButtonText} className="mt-2 w-full justify-start">
                             Изменить текст кнопки
+                        </Button>
+                    ) : null}
+                    {isImageNode ? (
+                        <Button size="sm" variant="flat" onPress={onEditImageList} className="mt-2 w-full justify-start">
+                            Изменить изображения
                         </Button>
                     ) : null}
                     {isBotNode ? (
