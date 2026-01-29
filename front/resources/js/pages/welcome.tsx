@@ -43,82 +43,6 @@ const NODE_KIND_LABELS: Record<NodeKind, string> = {
     node: 'Блок',
 };
 
-const layoutTree = (nodes: Node<NodeData>[], edges: Edge[]) => {
-    const adjacency = new Map<string, string[]>();
-    const inDegree = new Map<string, number>();
-
-    nodes.forEach((node) => {
-        adjacency.set(node.id, []);
-        inDegree.set(node.id, 0);
-    });
-
-    edges.forEach((edge) => {
-        if (!adjacency.has(edge.source) || !adjacency.has(edge.target)) {
-            return;
-        }
-        adjacency.get(edge.source)?.push(edge.target);
-        inDegree.set(edge.target, (inDegree.get(edge.target) ?? 0) + 1);
-    });
-
-    const roots = nodes.filter((node) => (inDegree.get(node.id) ?? 0) === 0).map((node) => node.id);
-    const queue = roots.length ? [...roots] : nodes.map((node) => node.id);
-    const depth = new Map<string, number>();
-    const order = new Map<string, number>();
-    let orderIndex = 0;
-
-    while (queue.length) {
-        const current = queue.shift();
-        if (!current || order.has(current)) {
-            continue;
-        }
-        order.set(current, orderIndex);
-        orderIndex += 1;
-        const currentDepth = depth.get(current) ?? 0;
-        const children = adjacency.get(current) ?? [];
-        children.forEach((child) => {
-            if (!depth.has(child)) {
-                depth.set(child, currentDepth + 1);
-            }
-            queue.push(child);
-        });
-    }
-
-    nodes.forEach((node) => {
-        if (!depth.has(node.id)) {
-            depth.set(node.id, 0);
-        }
-        if (!order.has(node.id)) {
-            order.set(node.id, orderIndex);
-            orderIndex += 1;
-        }
-    });
-
-    const levels = new Map<number, string[]>();
-    nodes.forEach((node) => {
-        const level = depth.get(node.id) ?? 0;
-        const list = levels.get(level) ?? [];
-        list.push(node.id);
-        levels.set(level, list);
-    });
-
-    const positions = new Map<string, { x: number; y: number }>();
-    const levelKeys = [...levels.keys()].sort((a, b) => a - b);
-    const startX = 140;
-    const startY = 120;
-    const gapX = 280;
-    const gapY = 140;
-
-    levelKeys.forEach((level) => {
-        const list = levels.get(level) ?? [];
-        list.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
-        list.forEach((id, index) => {
-            positions.set(id, { x: startX + level * gapX, y: startY + index * gapY });
-        });
-    });
-
-    return positions;
-};
-
 const getNodeTitle = (node: Node<NodeData>) => {
     switch (node.data.kind) {
         case 'command':
@@ -157,7 +81,6 @@ export default function Welcome() {
     const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
     const [menu, setMenu] = useState<ContextMenu | null>(null);
     const [linkSearch, setLinkSearch] = useState('');
-    const [layoutRequested, setLayoutRequested] = useState(true);
     const [bot, setBot] = useState<Bot | null>(null);
     const [isHydrating, setIsHydrating] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
@@ -187,18 +110,11 @@ export default function Welcome() {
         return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     }, []);
 
-    const requestLayout = useCallback(() => {
-        setLayoutRequested(true);
-    }, []);
-
     const handleEdgesChange = useCallback(
         (changes: import('reactflow').EdgeChange[]) => {
             onEdgesChange(changes);
-            if (changes.some((change) => change.type === 'add' || change.type === 'remove')) {
-                requestLayout();
-            }
         },
-        [onEdgesChange, requestLayout]
+        [onEdgesChange]
     );
 
     const handleNodesChange = useCallback(
@@ -248,17 +164,15 @@ export default function Welcome() {
     const onConnect = useCallback(
         (connection: Connection) => {
             setEdges((eds) => addEdge({ ...connection, type: 'bezier' }, eds));
-            requestLayout();
         },
-        [requestLayout, setEdges]
+        [setEdges]
     );
 
     const addNode = useCallback(
         (node: Node<NodeData>) => {
             setNodes((nds) => nds.concat(node));
-            requestLayout();
         },
-        [requestLayout, setNodes]
+        [setNodes]
     );
 
     const handleAddCommandNode = useCallback(() => {
@@ -414,10 +328,9 @@ export default function Welcome() {
                     eds
                 );
             });
-            requestLayout();
             setMenu(null);
         },
-        [generateId, menu, requestLayout, setEdges]
+        [generateId, menu, setEdges]
     );
 
     const handleCreateAndLink = useCallback(
@@ -524,10 +437,9 @@ export default function Welcome() {
                     eds
                 )
             );
-            requestLayout();
             setMenu(null);
         },
-        [generateId, menu, nodes, requestLayout, setEdges, setNodes]
+        [generateId, menu, nodes, setEdges, setNodes]
     );
 
     const handlePaneClick = useCallback(() => {
@@ -654,18 +566,16 @@ export default function Welcome() {
         }
         setNodes((nds) => nds.filter((node) => node.id !== menu.id));
         setEdges((eds) => eds.filter((edge) => edge.source !== menu.id && edge.target !== menu.id));
-        requestLayout();
         setMenu(null);
-    }, [menu, requestLayout, setEdges, setNodes]);
+    }, [menu, setEdges, setNodes]);
 
     const handleDeleteEdge = useCallback(() => {
         if (!menu || menu.kind !== 'edge') {
             return;
         }
         setEdges((eds) => eds.filter((edge) => edge.id !== menu.id));
-        requestLayout();
         setMenu(null);
-    }, [menu, requestLayout, setEdges]);
+    }, [menu, setEdges]);
 
     const handleStartBot = useCallback(async () => {
         if (!bot) {
@@ -761,7 +671,7 @@ export default function Welcome() {
                 }
             }
         },
-        [bot, setEdges, setNodes, applyBotToNode, requestLayout]
+        [bot, setEdges, setNodes, applyBotToNode]
     );
 
     const handleImportClick = useCallback(() => {
@@ -811,7 +721,7 @@ export default function Welcome() {
         return () => {
             isMounted = false;
         };
-    }, [applyBotToNode, requestLayout, setEdges, setNodes]);
+    }, [applyBotToNode, setEdges, setNodes]);
 
     useEffect(() => {
         if (isHydrating || !bot) {
@@ -849,30 +759,6 @@ export default function Welcome() {
             return changed ? next : nds;
         });
     }, [edges, setNodes]);
-
-    useEffect(() => {
-        if (!layoutRequested) {
-            return;
-        }
-        setNodes((nds) => {
-            const positions = layoutTree(nds, edges);
-            let changed = false;
-            const next = nds.map((node) => {
-                const nextPosition = positions.get(node.id) ?? node.position;
-                const samePosition = node.position.x === nextPosition.x && node.position.y === nextPosition.y;
-                if (!samePosition) {
-                    changed = true;
-                    return {
-                        ...node,
-                        position: nextPosition,
-                    };
-                }
-                return node;
-            });
-            return changed ? next : nds;
-        });
-        setLayoutRequested(false);
-    }, [edges, layoutRequested, setNodes]);
 
     const currentNode = menu?.kind === 'node' ? nodes.find((node) => node.id === menu.id) ?? null : null;
     const linkCandidates = useMemo(() => {
