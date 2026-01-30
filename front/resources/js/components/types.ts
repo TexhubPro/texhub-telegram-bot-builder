@@ -9,6 +9,8 @@ export type NodeKind =
     | 'video'
     | 'audio'
     | 'document'
+    | 'webhook'
+    | 'condition'
     | 'button_row'
     | 'image'
     | 'node';
@@ -28,6 +30,7 @@ export type NodeData = {
     audioUrls?: string[];
     documentUrls?: string[];
     timerSeconds?: number;
+    conditionText?: string;
     canAddChild?: boolean;
 };
 

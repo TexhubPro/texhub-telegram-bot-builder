@@ -20,6 +20,7 @@ type Values = {
     audioFiles: File[];
     documentUrls: string[];
     documentFiles: File[];
+    conditionText: string;
 };
 
 type Props = {
@@ -48,6 +49,10 @@ const getTitle = (kind?: NodeKind) => {
             return 'Аудио';
         case 'document':
             return 'Документ';
+        case 'condition':
+            return 'Проверка';
+        case 'webhook':
+            return 'Вебхук';
         case 'image':
             return 'Изображения';
         default:
@@ -118,6 +123,14 @@ export function NodeEditorPanel({ node, values, onChange, onSave, onClose }: Pro
                                     type="number"
                                     min="0"
                                     step="1"
+                                />
+                            ) : null}
+                            {kind === 'condition' ? (
+                                <FieldInput
+                                    label="Текст для проверки"
+                                    value={values.conditionText}
+                                    onChange={(value) => onChange({ ...values, conditionText: value })}
+                                    placeholder="Привет"
                                 />
                             ) : null}
                             {kind === 'image' ? (

@@ -18,6 +18,7 @@ import { BotActionsContext } from '../components/nodes/bot-actions-context';
 import { BotNode } from '../components/nodes/bot-node';
 import { ButtonRowNode } from '../components/nodes/button-row-node';
 import { CommandNode } from '../components/nodes/command-node';
+import { ConditionNode } from '../components/nodes/condition-node';
 import { NodeContextMenu } from '../components/nodes/context-menu';
 import { GraphActionsContext } from '../components/nodes/graph-actions-context';
 import { AudioNode } from '../components/nodes/audio-node';
@@ -30,6 +31,7 @@ import { ReplyButtonNode } from '../components/nodes/reply-button-node';
 import { StyledNode } from '../components/nodes/styled-node';
 import { TimerNode } from '../components/nodes/timer-node';
 import { VideoNode } from '../components/nodes/video-node';
+import { WebhookNode } from '../components/nodes/webhook-node';
 import { NodeEditorPanel } from '../components/sidebar/node-editor-panel';
 import { Sidebar } from '../components/sidebar/sidebar';
 import { DeletableEdge } from '../components/edges/deletable-edge';
@@ -51,6 +53,8 @@ const NODE_KIND_LABELS: Record<NodeKind, string> = {
     video: 'Видео',
     audio: 'Аудио',
     document: 'Документ',
+    webhook: 'Вебхук',
+    condition: 'Проверка',
     button_row: 'Rows',
     image: 'Изображения',
     node: 'Блок',
@@ -85,6 +89,10 @@ const getNodeTitle = (node: Node<NodeData>) => {
             const count = node.data.documentUrls?.length ?? 0;
             return count ? `Документы (${count})` : 'Документы';
         }
+        case 'webhook':
+            return 'Сообщение пользователя';
+        case 'condition':
+            return node.data.conditionText ? `Если: ${node.data.conditionText}` : 'Проверка';
         case 'timer': {
             const raw = node.data.timerSeconds ?? 0;
             const seconds = typeof raw === 'number' ? raw : Number(raw) || 0;
@@ -118,6 +126,7 @@ const buildEditorValues = (node: Node<NodeData>) => ({
     audioFiles: [] as File[],
     documentUrls: node.data.documentUrls ?? [],
     documentFiles: [] as File[],
+    conditionText: node.data.conditionText ?? '',
     timerSeconds: node.data.timerSeconds !== undefined ? String(node.data.timerSeconds) : '',
 });
 
@@ -142,6 +151,7 @@ export default function Welcome() {
         audioFiles: [] as File[],
         documentUrls: [] as string[],
         documentFiles: [] as File[],
+        conditionText: '',
         timerSeconds: '',
     });
     const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -161,6 +171,8 @@ export default function Welcome() {
             video: VideoNode,
             audio: AudioNode,
             document: DocumentNode,
+            webhook: WebhookNode,
+            condition: ConditionNode,
             button_row: ButtonRowNode,
             image: ImageNode,
             bot: BotNode,
@@ -339,6 +351,24 @@ export default function Welcome() {
             type: 'document',
             position: { x: 520, y: 220 },
             data: { label: 'Документ', kind: 'document', documentUrls: [] },
+        });
+    }, [addNodeAndEdit, generateId]);
+
+    const handleAddWebhookNode = useCallback(() => {
+        addNode({
+            id: generateId('webhook'),
+            type: 'webhook',
+            position: { x: 520, y: 220 },
+            data: { label: 'Вебхук', kind: 'webhook' },
+        });
+    }, [addNode, generateId]);
+
+    const handleAddConditionNode = useCallback(() => {
+        addNodeAndEdit({
+            id: generateId('condition'),
+            type: 'condition',
+            position: { x: 520, y: 220 },
+            data: { label: 'Проверка', kind: 'condition', conditionText: '' },
         });
     }, [addNodeAndEdit, generateId]);
 
@@ -540,6 +570,24 @@ export default function Welcome() {
                 };
             }
 
+            if (templateKey === 'webhook') {
+                newNode = {
+                    id: generateId('webhook'),
+                    type: 'webhook',
+                    position,
+                    data: { label: 'Вебхук', kind: 'webhook' },
+                };
+            }
+
+            if (templateKey === 'condition') {
+                newNode = {
+                    id: generateId('condition'),
+                    type: 'condition',
+                    position,
+                    data: { label: 'Проверка', kind: 'condition', conditionText: '' },
+                };
+            }
+
             if (!newNode) {
                 return;
             }
@@ -633,6 +681,9 @@ export default function Welcome() {
                     }
                     if (kind === 'document') {
                         return { ...node, data: { ...node.data, documentUrls: editorValues.documentUrls } };
+                    }
+                    if (kind === 'condition') {
+                        return { ...node, data: { ...node.data, conditionText: editorValues.conditionText } };
                     }
                     return node;
                 })
@@ -947,6 +998,8 @@ export default function Welcome() {
                     node.data.kind === 'document' ||
                     node.data.kind === 'button_row' ||
                     node.data.kind === 'timer' ||
+                    node.data.kind === 'webhook' ||
+                    node.data.kind === 'condition' ||
                     !sources.has(node.id);
                 if (node.data.canAddChild === canAddChild) {
                     return node;
@@ -993,6 +1046,29 @@ export default function Welcome() {
                 );
             }
             if (sourceKind === 'command') {
+                candidates = candidates.filter(
+                    (node) =>
+                        node.data.kind === 'message' ||
+                        node.data.kind === 'image' ||
+                        node.data.kind === 'video' ||
+                        node.data.kind === 'audio' ||
+                        node.data.kind === 'document' ||
+                        node.data.kind === 'timer'
+                );
+            }
+            if (sourceKind === 'webhook') {
+                candidates = candidates.filter(
+                    (node) =>
+                        node.data.kind === 'condition' ||
+                        node.data.kind === 'message' ||
+                        node.data.kind === 'image' ||
+                        node.data.kind === 'video' ||
+                        node.data.kind === 'audio' ||
+                        node.data.kind === 'document' ||
+                        node.data.kind === 'timer'
+                );
+            }
+            if (sourceKind === 'condition') {
                 candidates = candidates.filter(
                     (node) =>
                         node.data.kind === 'message' ||
@@ -1054,6 +1130,8 @@ export default function Welcome() {
             { key: 'video', label: 'Видео', description: 'Видео файлы' },
             { key: 'audio', label: 'Аудио', description: 'Аудио файлы' },
             { key: 'document', label: 'Документ', description: 'Файлы документов' },
+            { key: 'webhook', label: 'Вебхук', description: 'Сообщение пользователя' },
+            { key: 'condition', label: 'Проверка', description: 'Сравнить текст' },
         ],
         []
     );
@@ -1077,6 +1155,29 @@ export default function Welcome() {
             );
         }
         if (sourceKind === 'command') {
+            templates = createTemplates.filter(
+                (item) =>
+                    item.key === 'message' ||
+                    item.key === 'image' ||
+                    item.key === 'video' ||
+                    item.key === 'audio' ||
+                    item.key === 'document' ||
+                    item.key === 'timer'
+            );
+        }
+        if (sourceKind === 'webhook') {
+            templates = createTemplates.filter(
+                (item) =>
+                    item.key === 'condition' ||
+                    item.key === 'message' ||
+                    item.key === 'image' ||
+                    item.key === 'video' ||
+                    item.key === 'audio' ||
+                    item.key === 'document' ||
+                    item.key === 'timer'
+            );
+        }
+        if (sourceKind === 'condition') {
             templates = createTemplates.filter(
                 (item) =>
                     item.key === 'message' ||
@@ -1143,6 +1244,8 @@ export default function Welcome() {
             { key: 'video', label: 'Видео', description: 'Видео файлы', action: handleAddVideoNode },
             { key: 'audio', label: 'Аудио', description: 'Аудио файлы', action: handleAddAudioNode },
             { key: 'document', label: 'Документ', description: 'Файлы документов', action: handleAddDocumentNode },
+            { key: 'webhook', label: 'Вебхук', description: 'Сообщение пользователя', action: handleAddWebhookNode },
+            { key: 'condition', label: 'Проверка', description: 'Сравнить текст', action: handleAddConditionNode },
             { key: 'bot', label: 'Бот', description: 'Токен и статус', action: handleAddBot },
         ],
         [
@@ -1158,6 +1261,8 @@ export default function Welcome() {
             handleAddVideoNode,
             handleAddAudioNode,
             handleAddDocumentNode,
+            handleAddWebhookNode,
+            handleAddConditionNode,
         ]
     );
 

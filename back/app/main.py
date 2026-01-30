@@ -171,7 +171,13 @@ def parse_timer_seconds(node: dict) -> float:
     return max(0.0, value)
 
 
-def collect_content_targets_with_delay(flow: Flow, source_id: str) -> List[Tuple[dict, float]]:
+def match_condition(message_text: str, condition_text: str) -> bool:
+    if not condition_text:
+        return False
+    return message_text.strip().lower() == condition_text.strip().lower()
+
+
+def collect_content_targets_with_delay(flow: Flow, source_id: str, message_text: str = "") -> List[Tuple[dict, float]]:
     nodes_by_id = {node.get("id"): node for node in flow.nodes}
     results: List[Tuple[dict, float]] = []
     seen_targets: set[str] = set()
@@ -197,6 +203,10 @@ def collect_content_targets_with_delay(flow: Flow, source_id: str) -> List[Tuple
             elif kind == "timer":
                 next_delay = delay + parse_timer_seconds(target_node)
                 queue.append((target_node.get("id") or "", next_delay))
+            elif kind == "condition":
+                condition_text = (target_node.get("data", {}).get("conditionText") or "").strip()
+                if match_condition(message_text, condition_text):
+                    queue.append((target_node.get("id") or "", delay))
     return results
 
 
@@ -546,13 +556,23 @@ async def run_bot_polling(bot: Bot) -> None:
         if command:
             command_node = find_command_node(flow, command)
             if command_node:
-                targets = collect_content_targets_with_delay(flow, command_node.get("id") or "")
+                targets = collect_content_targets_with_delay(flow, command_node.get("id") or "", message.text or "")
                 await send_targets_with_delay(flow, message, targets)
-            return
+                return
         reply_button = find_reply_button_by_text(flow, message.text)
         if reply_button:
-            targets = collect_content_targets_with_delay(flow, reply_button.get("id") or "")
-            await send_targets_with_delay(flow, message, targets)
+            targets = collect_content_targets_with_delay(flow, reply_button.get("id") or "", message.text)
+            if targets:
+                await send_targets_with_delay(flow, message, targets)
+                return
+        webhook_nodes = [node for node in flow.nodes if node.get("data", {}).get("kind") == "webhook"]
+        if webhook_nodes:
+            all_targets: List[Tuple[dict, float]] = []
+            for webhook_node in webhook_nodes:
+                all_targets.extend(
+                    collect_content_targets_with_delay(flow, webhook_node.get("id") or "", message.text)
+                )
+            await send_targets_with_delay(flow, message, all_targets)
 
     dispatcher.message()(handler)
 
@@ -575,7 +595,7 @@ async def run_bot_polling(bot: Bot) -> None:
             if command:
                 command_node = find_command_node(flow, command)
                 if command_node:
-                    targets = collect_content_targets_with_delay(flow, command_node.get("id") or "")
+                    targets = collect_content_targets_with_delay(flow, command_node.get("id") or "", data)
                     await send_targets_with_delay(flow, query.message, targets)
                 return
         await query.message.answer(data)
