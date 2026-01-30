@@ -9,6 +9,8 @@ export type NodeKind =
     | 'video'
     | 'audio'
     | 'document'
+    | 'status_set'
+    | 'status_get'
     | 'webhook'
     | 'condition'
     | 'button_row'
@@ -29,16 +31,12 @@ export type NodeData = {
     videoUrls?: string[];
     audioUrls?: string[];
     documentUrls?: string[];
+    statusValue?: string;
     timerSeconds?: number;
     conditionText?: string;
-    conditionHasText?: boolean;
-    conditionHasNumber?: boolean;
-    conditionHasPhoto?: boolean;
-    conditionHasVideo?: boolean;
-    conditionHasAudio?: boolean;
-    conditionHasLocation?: boolean;
-    conditionMinLength?: number;
-    conditionMaxLength?: number;
+    conditionType?: string;
+    conditionLengthOp?: string;
+    conditionLengthValue?: number;
     canAddChild?: boolean;
 };
 
@@ -52,5 +50,5 @@ export type Bot = {
 
 export type ContextMenu =
     | { kind: 'node'; id: string; x: number; y: number }
-    | { kind: 'add-edge'; id: string; x: number; y: number }
+    | { kind: 'add-edge'; id: string; x: number; y: number; sourceHandle?: string }
     | { kind: 'edge'; id: string; x: number; y: number };

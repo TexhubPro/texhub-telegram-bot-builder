@@ -1,4 +1,4 @@
-import { Button, Card, CardBody, Divider } from '@heroui/react';
+﻿import { Button, Card, CardBody, Divider } from '@heroui/react';
 import type { Node } from 'reactflow';
 import type { NodeData, NodeKind } from '../types';
 import { FieldInput } from '../ui/field-input';
@@ -20,15 +20,11 @@ type Values = {
     audioFiles: File[];
     documentUrls: string[];
     documentFiles: File[];
+    statusValue: string;
     conditionText: string;
-    conditionHasText: boolean;
-    conditionHasNumber: boolean;
-    conditionHasPhoto: boolean;
-    conditionHasVideo: boolean;
-    conditionHasAudio: boolean;
-    conditionHasLocation: boolean;
-    conditionMinLength: string;
-    conditionMaxLength: string;
+    conditionType: string;
+    conditionLengthOp: string;
+    conditionLengthValue: string;
 };
 
 type Props = {
@@ -57,6 +53,10 @@ const getTitle = (kind?: NodeKind) => {
             return 'Аудио';
         case 'document':
             return 'Документ';
+        case 'status_set':
+            return 'Статус';
+        case 'status_get':
+            return 'Статус';
         case 'condition':
             return 'Проверка';
         case 'webhook':
@@ -133,91 +133,73 @@ export function NodeEditorPanel({ node, values, onChange, onSave, onClose }: Pro
                                     step="1"
                                 />
                             ) : null}
+                            {kind === 'status_set' ? (
+                                <FieldInput
+                                    label="Статус"
+                                    value={values.statusValue}
+                                    onChange={(value) => onChange({ ...values, statusValue: value })}
+                                    placeholder="send_phone"
+                                />
+                            ) : null}
                             {kind === 'condition' ? (
                                 <div className="flex flex-col gap-3">
-                                    <FieldInput
-                                        label="Текст (точное совпадение)"
-                                        value={values.conditionText}
-                                        onChange={(value) => onChange({ ...values, conditionText: value })}
-                                        placeholder="Привет"
-                                    />
-                                    <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
-                                        <label className="flex items-center gap-2">
-                                            <input
-                                                type="checkbox"
-                                                checked={values.conditionHasText}
-                                                onChange={(event) =>
-                                                    onChange({ ...values, conditionHasText: event.target.checked })
-                                                }
-                                            />
-                                            Есть текст
-                                        </label>
-                                        <label className="flex items-center gap-2">
-                                            <input
-                                                type="checkbox"
-                                                checked={values.conditionHasNumber}
-                                                onChange={(event) =>
-                                                    onChange({ ...values, conditionHasNumber: event.target.checked })
-                                                }
-                                            />
-                                            Есть номер
-                                        </label>
-                                        <label className="flex items-center gap-2">
-                                            <input
-                                                type="checkbox"
-                                                checked={values.conditionHasPhoto}
-                                                onChange={(event) =>
-                                                    onChange({ ...values, conditionHasPhoto: event.target.checked })
-                                                }
-                                            />
-                                            Есть фото
-                                        </label>
-                                        <label className="flex items-center gap-2">
-                                            <input
-                                                type="checkbox"
-                                                checked={values.conditionHasVideo}
-                                                onChange={(event) =>
-                                                    onChange({ ...values, conditionHasVideo: event.target.checked })
-                                                }
-                                            />
-                                            Есть видео
-                                        </label>
-                                        <label className="flex items-center gap-2">
-                                            <input
-                                                type="checkbox"
-                                                checked={values.conditionHasAudio}
-                                                onChange={(event) =>
-                                                    onChange({ ...values, conditionHasAudio: event.target.checked })
-                                                }
-                                            />
-                                            Есть аудио
-                                        </label>
-                                        <label className="flex items-center gap-2">
-                                            <input
-                                                type="checkbox"
-                                                checked={values.conditionHasLocation}
-                                                onChange={(event) =>
-                                                    onChange({ ...values, conditionHasLocation: event.target.checked })
-                                                }
-                                            />
-                                            Есть гео
-                                        </label>
+                                    <div className="flex flex-col gap-2">
+                                        <label className="block text-xs font-semibold text-slate-600">Условие</label>
+                                        <select
+                                            value={values.conditionType}
+                                            onChange={(event) =>
+                                                onChange({ ...values, conditionType: event.target.value })
+                                            }
+                                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                                        >
+                                            <option value="">Выбери условие</option>
+                                            <option value="text">Текст = (точное совпадение)</option>
+                                            <option value="status">Статус = (точное совпадение)</option>
+                                            <option value="has_text">Есть текст</option>
+                                            <option value="has_number">Есть номер</option>
+                                            <option value="has_photo">Есть фото</option>
+                                            <option value="has_video">Есть видео</option>
+                                            <option value="has_audio">Есть аудио</option>
+                                            <option value="has_location">Есть гео</option>
+                                        </select>
                                     </div>
-                                    <div className="grid grid-cols-2 gap-2">
+                                    {values.conditionType === 'text' || values.conditionType === 'status' ? (
                                         <FieldInput
-                                            label="Мин. длина"
-                                            value={values.conditionMinLength}
-                                            onChange={(value) => onChange({ ...values, conditionMinLength: value })}
-                                            placeholder="0"
-                                            type="number"
-                                            min="0"
-                                            step="1"
+                                            label={
+                                                values.conditionType === 'status'
+                                                    ? 'Статус для проверки'
+                                                    : 'Текст для проверки'
+                                            }
+                                            value={values.conditionText}
+                                            onChange={(value) => onChange({ ...values, conditionText: value })}
+                                            placeholder="Привет"
                                         />
+                                    ) : null}
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div className="flex flex-col gap-2">
+                                            <label className="block text-xs font-semibold text-slate-600">
+                                                Длина текста
+                                            </label>
+                                            <select
+                                                value={values.conditionLengthOp}
+                                                onChange={(event) =>
+                                                    onChange({ ...values, conditionLengthOp: event.target.value })
+                                                }
+                                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                                            >
+                                                <option value="">Без проверки</option>
+                                                <option value="lt">Меньше</option>
+                                                <option value="lte">Меньше или равно</option>
+                                                <option value="eq">Равно</option>
+                                                <option value="gte">Больше или равно</option>
+                                                <option value="gt">Больше</option>
+                                            </select>
+                                        </div>
                                         <FieldInput
-                                            label="Макс. длина"
-                                            value={values.conditionMaxLength}
-                                            onChange={(value) => onChange({ ...values, conditionMaxLength: value })}
-                                            placeholder="100"
+                                            label="Кол-во символов"
+                                            value={values.conditionLengthValue}
+                                            onChange={(value) => onChange({ ...values, conditionLengthValue: value })}
+                                            placeholder="5"
                                             type="number"
                                             min="0"
                                             step="1"

@@ -30,6 +30,8 @@ import { ReplyClearNode } from '../components/nodes/reply-clear-node';
 import { ReplyButtonNode } from '../components/nodes/reply-button-node';
 import { StyledNode } from '../components/nodes/styled-node';
 import { TimerNode } from '../components/nodes/timer-node';
+import { StatusGetNode } from '../components/nodes/status-get-node';
+import { StatusSetNode } from '../components/nodes/status-set-node';
 import { VideoNode } from '../components/nodes/video-node';
 import { WebhookNode } from '../components/nodes/webhook-node';
 import { NodeEditorPanel } from '../components/sidebar/node-editor-panel';
@@ -53,6 +55,8 @@ const NODE_KIND_LABELS: Record<NodeKind, string> = {
     video: 'Видео',
     audio: 'Аудио',
     document: 'Документ',
+    status_set: 'Статус',
+    status_get: 'Статус',
     webhook: 'Вебхук',
     condition: 'Проверка',
     button_row: 'Rows',
@@ -89,6 +93,12 @@ const getNodeTitle = (node: Node<NodeData>) => {
             const count = node.data.documentUrls?.length ?? 0;
             return count ? `Документы (${count})` : 'Документы';
         }
+        case 'status_set': {
+            const value = (node.data.statusValue ?? '').trim();
+            return value ? `Статус: ${value}` : 'Установить статус';
+        }
+        case 'status_get':
+            return 'Получить статус';
         case 'webhook':
             return 'Сообщение пользователя';
         case 'condition':
@@ -114,29 +124,46 @@ const getClientPosition = (event: MouseEvent | TouchEvent) => {
     return { x: mouseEvent.clientX, y: mouseEvent.clientY };
 };
 
-const buildEditorValues = (node: Node<NodeData>) => ({
-    commandText: node.data.commandText ?? '',
-    messageText: node.data.messageText ?? '',
-    buttonText: node.data.buttonText ?? '',
-    imageUrls: node.data.imageUrls ?? [],
-    imageFiles: [] as File[],
-    videoUrls: node.data.videoUrls ?? [],
-    videoFiles: [] as File[],
-    audioUrls: node.data.audioUrls ?? [],
-    audioFiles: [] as File[],
-    documentUrls: node.data.documentUrls ?? [],
-    documentFiles: [] as File[],
-    conditionText: node.data.conditionText ?? '',
-    conditionHasText: node.data.conditionHasText ?? false,
-    conditionHasNumber: node.data.conditionHasNumber ?? false,
-    conditionHasPhoto: node.data.conditionHasPhoto ?? false,
-    conditionHasVideo: node.data.conditionHasVideo ?? false,
-    conditionHasAudio: node.data.conditionHasAudio ?? false,
-    conditionHasLocation: node.data.conditionHasLocation ?? false,
-    conditionMinLength: node.data.conditionMinLength !== undefined ? String(node.data.conditionMinLength) : '',
-    conditionMaxLength: node.data.conditionMaxLength !== undefined ? String(node.data.conditionMaxLength) : '',
-    timerSeconds: node.data.timerSeconds !== undefined ? String(node.data.timerSeconds) : '',
-});
+const buildEditorValues = (node: Node<NodeData>) => {
+    const legacy = node.data as NodeData & {
+        conditionHasText?: boolean;
+        conditionHasNumber?: boolean;
+        conditionHasPhoto?: boolean;
+        conditionHasVideo?: boolean;
+        conditionHasAudio?: boolean;
+        conditionHasLocation?: boolean;
+    };
+    let conditionType = node.data.conditionType ?? '';
+    if (!conditionType) {
+        if (legacy.conditionHasText) conditionType = 'has_text';
+        else if (legacy.conditionHasNumber) conditionType = 'has_number';
+        else if (legacy.conditionHasPhoto) conditionType = 'has_photo';
+        else if (legacy.conditionHasVideo) conditionType = 'has_video';
+        else if (legacy.conditionHasAudio) conditionType = 'has_audio';
+        else if (legacy.conditionHasLocation) conditionType = 'has_location';
+        else if (node.data.conditionText) conditionType = 'text';
+    }
+    return {
+        commandText: node.data.commandText ?? '',
+        messageText: node.data.messageText ?? '',
+        buttonText: node.data.buttonText ?? '',
+        imageUrls: node.data.imageUrls ?? [],
+        imageFiles: [] as File[],
+        videoUrls: node.data.videoUrls ?? [],
+        videoFiles: [] as File[],
+        audioUrls: node.data.audioUrls ?? [],
+        audioFiles: [] as File[],
+        documentUrls: node.data.documentUrls ?? [],
+        documentFiles: [] as File[],
+        statusValue: node.data.statusValue ?? '',
+        conditionText: node.data.conditionText ?? '',
+        conditionType,
+        conditionLengthOp: node.data.conditionLengthOp ?? '',
+        conditionLengthValue:
+            node.data.conditionLengthValue !== undefined ? String(node.data.conditionLengthValue) : '',
+        timerSeconds: node.data.timerSeconds !== undefined ? String(node.data.timerSeconds) : '',
+    };
+};
 
 export default function Welcome() {
     const [nodes, setNodes, onNodesChange] = useNodesState<NodeData>(initialNodes);
@@ -159,20 +186,17 @@ export default function Welcome() {
         audioFiles: [] as File[],
         documentUrls: [] as string[],
         documentFiles: [] as File[],
+        statusValue: '',
         conditionText: '',
-        conditionHasText: false,
-        conditionHasNumber: false,
-        conditionHasPhoto: false,
-        conditionHasVideo: false,
-        conditionHasAudio: false,
-        conditionHasLocation: false,
-        conditionMinLength: '',
-        conditionMaxLength: '',
+        conditionType: '',
+        conditionLengthOp: '',
+        conditionLengthValue: '',
         timerSeconds: '',
     });
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const saveTimerRef = useRef<number | null>(null);
     const connectSourceRef = useRef<string | null>(null);
+    const connectSourceHandleRef = useRef<string | null>(null);
     const suppressPaneClickRef = useRef(false);
 
     const nodeTypes = useMemo(
@@ -184,6 +208,8 @@ export default function Welcome() {
             reply_button: ReplyButtonNode,
             reply_clear: ReplyClearNode,
             timer: TimerNode,
+            status_set: StatusSetNode,
+            status_get: StatusGetNode,
             video: VideoNode,
             audio: AudioNode,
             document: DocumentNode,
@@ -229,19 +255,22 @@ export default function Welcome() {
         [onNodesChange]
     );
 
-    const handleOpenAddMenu = useCallback((nodeId: string, position: { x: number; y: number }) => {
+    const handleOpenAddMenu = useCallback(
+        (nodeId: string, position: { x: number; y: number }, sourceHandle?: string) => {
         suppressPaneClickRef.current = true;
         setLinkSearch('');
-        setMenu({ kind: 'add-edge', id: nodeId, x: position.x, y: position.y });
+        setMenu({ kind: 'add-edge', id: nodeId, x: position.x, y: position.y, sourceHandle });
     }, []);
 
     const handleConnectStart = useCallback(
         (_event: React.MouseEvent | React.TouchEvent, params: import('reactflow').OnConnectStartParams) => {
             if (params.handleType && params.handleType !== 'source') {
                 connectSourceRef.current = null;
+                connectSourceHandleRef.current = null;
                 return;
             }
             connectSourceRef.current = params.nodeId ?? null;
+            connectSourceHandleRef.current = params.handleId ?? null;
         },
         []
     );
@@ -249,7 +278,9 @@ export default function Welcome() {
     const handleConnectEnd = useCallback(
         (event: MouseEvent | TouchEvent) => {
             const sourceId = connectSourceRef.current;
+            const sourceHandle = connectSourceHandleRef.current ?? undefined;
             connectSourceRef.current = null;
+            connectSourceHandleRef.current = null;
             if (!sourceId) {
                 return;
             }
@@ -261,7 +292,7 @@ export default function Welcome() {
                 return;
             }
             const coords = getClientPosition(event);
-            handleOpenAddMenu(sourceId, coords);
+            handleOpenAddMenu(sourceId, coords, sourceHandle);
         },
         [handleOpenAddMenu]
     );
@@ -334,6 +365,24 @@ export default function Welcome() {
         });
     }, [addNodeAndEdit, generateId]);
 
+    const handleAddStatusSetNode = useCallback(() => {
+        addNodeAndEdit({
+            id: generateId('status_set'),
+            type: 'status_set',
+            position: { x: 520, y: 240 },
+            data: { label: 'Статус', kind: 'status_set', statusValue: '' },
+        });
+    }, [addNodeAndEdit, generateId]);
+
+    const handleAddStatusGetNode = useCallback(() => {
+        addNode({
+            id: generateId('status_get'),
+            type: 'status_get',
+            position: { x: 520, y: 240 },
+            data: { label: 'Статус', kind: 'status_get' },
+        });
+    }, [addNode, generateId]);
+
     const handleAddImageNode = useCallback(() => {
         addNodeAndEdit({
             id: generateId('image'),
@@ -384,7 +433,7 @@ export default function Welcome() {
             id: generateId('condition'),
             type: 'condition',
             position: { x: 520, y: 220 },
-            data: { label: 'Проверка', kind: 'condition', conditionText: '' },
+            data: { label: 'Проверка', kind: 'condition', conditionText: '', conditionType: '' },
         });
     }, [addNodeAndEdit, generateId]);
 
@@ -468,6 +517,7 @@ export default function Welcome() {
                         source: menu.id,
                         target: targetId,
                         type: 'bezier',
+                        sourceHandle: menu.sourceHandle,
                     },
                     eds
                 );
@@ -550,6 +600,24 @@ export default function Welcome() {
                 };
             }
 
+            if (templateKey === 'status_set') {
+                newNode = {
+                    id: generateId('status_set'),
+                    type: 'status_set',
+                    position,
+                    data: { label: 'Статус', kind: 'status_set', statusValue: '' },
+                };
+            }
+
+            if (templateKey === 'status_get') {
+                newNode = {
+                    id: generateId('status_get'),
+                    type: 'status_get',
+                    position,
+                    data: { label: 'Статус', kind: 'status_get' },
+                };
+            }
+
             if (templateKey === 'image') {
                 newNode = {
                     id: generateId('image'),
@@ -600,7 +668,7 @@ export default function Welcome() {
                     id: generateId('condition'),
                     type: 'condition',
                     position,
-                    data: { label: 'Проверка', kind: 'condition', conditionText: '' },
+                    data: { label: 'Проверка', kind: 'condition', conditionText: '', conditionType: '' },
                 };
             }
 
@@ -616,11 +684,16 @@ export default function Welcome() {
                         source: menu.id,
                         target: newNode.id,
                         type: 'bezier',
+                        sourceHandle: menu.sourceHandle,
                     },
                     eds
                 )
             );
-            if (newNode.data.kind !== 'button_row' && newNode.data.kind !== 'reply_clear') {
+            if (
+                newNode.data.kind !== 'button_row' &&
+                newNode.data.kind !== 'reply_clear' &&
+                newNode.data.kind !== 'status_get'
+            ) {
                 setEditorNodeId(newNode.id);
                 setEditorValues(buildEditorValues(newNode));
             }
@@ -689,6 +762,9 @@ export default function Welcome() {
                         const seconds = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
                         return { ...node, data: { ...node.data, timerSeconds: seconds } };
                     }
+                    if (kind === 'status_set') {
+                        return { ...node, data: { ...node.data, statusValue: editorValues.statusValue.trim() } };
+                    }
                     if (kind === 'video') {
                         return { ...node, data: { ...node.data, videoUrls: editorValues.videoUrls } };
                     }
@@ -699,27 +775,19 @@ export default function Welcome() {
                         return { ...node, data: { ...node.data, documentUrls: editorValues.documentUrls } };
                     }
                     if (kind === 'condition') {
-                        const minValue =
-                            editorValues.conditionMinLength.trim() === ''
+                        const lengthValue =
+                            editorValues.conditionLengthValue.trim() === ''
                                 ? undefined
-                                : Number(editorValues.conditionMinLength);
-                        const maxValue =
-                            editorValues.conditionMaxLength.trim() === ''
-                                ? undefined
-                                : Number(editorValues.conditionMaxLength);
+                                : Number(editorValues.conditionLengthValue);
+                        const normalizedType = editorValues.conditionType || '';
                         return {
                             ...node,
                             data: {
                                 ...node.data,
                                 conditionText: editorValues.conditionText,
-                                conditionHasText: editorValues.conditionHasText,
-                                conditionHasNumber: editorValues.conditionHasNumber,
-                                conditionHasPhoto: editorValues.conditionHasPhoto,
-                                conditionHasVideo: editorValues.conditionHasVideo,
-                                conditionHasAudio: editorValues.conditionHasAudio,
-                                conditionHasLocation: editorValues.conditionHasLocation,
-                                conditionMinLength: Number.isFinite(minValue) ? Math.max(0, minValue) : undefined,
-                                conditionMaxLength: Number.isFinite(maxValue) ? Math.max(0, maxValue) : undefined,
+                                conditionType: normalizedType,
+                                conditionLengthOp: editorValues.conditionLengthOp,
+                                conditionLengthValue: Number.isFinite(lengthValue) ? Math.max(0, lengthValue) : undefined,
                             },
                         };
                     }
@@ -946,7 +1014,7 @@ export default function Welcome() {
                     ) {
                         return true;
                     }
-                    if (target.data.kind === 'timer') {
+                    if (target.data.kind === 'timer' || target.data.kind === 'condition') {
                         stack.push(target.id);
                     }
                 }
@@ -1115,6 +1183,8 @@ export default function Welcome() {
                     node.data.kind === 'document' ||
                     node.data.kind === 'button_row' ||
                     node.data.kind === 'timer' ||
+                    node.data.kind === 'status_set' ||
+                    node.data.kind === 'status_get' ||
                     node.data.kind === 'webhook' ||
                     node.data.kind === 'condition' ||
                     !sources.has(node.id);
@@ -1145,6 +1215,8 @@ export default function Welcome() {
                         node.data.kind === 'button_row' ||
                         node.data.kind === 'reply_clear' ||
                         node.data.kind === 'timer' ||
+                        node.data.kind === 'status_set' ||
+                        node.data.kind === 'status_get' ||
                         node.data.kind === 'image' ||
                         node.data.kind === 'video' ||
                         node.data.kind === 'audio' ||
@@ -1159,6 +1231,8 @@ export default function Welcome() {
                         node.data.kind === 'video' ||
                         node.data.kind === 'audio' ||
                         node.data.kind === 'document' ||
+                        node.data.kind === 'status_set' ||
+                        node.data.kind === 'status_get' ||
                         node.data.kind === 'timer'
                 );
             }
@@ -1170,6 +1244,8 @@ export default function Welcome() {
                         node.data.kind === 'video' ||
                         node.data.kind === 'audio' ||
                         node.data.kind === 'document' ||
+                        node.data.kind === 'status_set' ||
+                        node.data.kind === 'status_get' ||
                         node.data.kind === 'timer'
                 );
             }
@@ -1177,6 +1253,8 @@ export default function Welcome() {
                 candidates = candidates.filter(
                     (node) =>
                         node.data.kind === 'condition' ||
+                        node.data.kind === 'status_set' ||
+                        node.data.kind === 'status_get' ||
                         node.data.kind === 'message' ||
                         node.data.kind === 'image' ||
                         node.data.kind === 'video' ||
@@ -1188,6 +1266,20 @@ export default function Welcome() {
             if (sourceKind === 'condition') {
                 candidates = candidates.filter(
                     (node) =>
+                        node.data.kind === 'message' ||
+                        node.data.kind === 'image' ||
+                        node.data.kind === 'video' ||
+                        node.data.kind === 'audio' ||
+                        node.data.kind === 'document' ||
+                        node.data.kind === 'status_set' ||
+                        node.data.kind === 'status_get' ||
+                        node.data.kind === 'timer'
+                );
+            }
+            if (sourceKind === 'status_set' || sourceKind === 'status_get') {
+                candidates = candidates.filter(
+                    (node) =>
+                        node.data.kind === 'condition' ||
                         node.data.kind === 'message' ||
                         node.data.kind === 'image' ||
                         node.data.kind === 'video' ||
@@ -1213,7 +1305,9 @@ export default function Welcome() {
                         node.data.kind === 'image' ||
                         node.data.kind === 'video' ||
                         node.data.kind === 'audio' ||
-                        node.data.kind === 'document'
+                        node.data.kind === 'document' ||
+                        node.data.kind === 'status_set' ||
+                        node.data.kind === 'status_get'
                 );
             }
             if (sourceKind === 'button_row') {
@@ -1243,6 +1337,8 @@ export default function Welcome() {
             { key: 'reply_button', label: 'Reply Button', description: 'Ответная кнопка' },
             { key: 'reply_clear', label: 'Clear Reply', description: 'Очистить reply-кнопки' },
             { key: 'timer', label: 'Таймер', description: 'Задержка перед сообщением' },
+            { key: 'status_set', label: 'Статус', description: 'Установить статус пользователя' },
+            { key: 'status_get', label: 'Статус', description: 'Получить статус пользователя' },
             { key: 'image', label: 'Изображения', description: 'Один или больше файлов' },
             { key: 'video', label: 'Видео', description: 'Видео файлы' },
             { key: 'audio', label: 'Аудио', description: 'Аудио файлы' },
@@ -1265,6 +1361,8 @@ export default function Welcome() {
                     item.key === 'button_row' ||
                     item.key === 'reply_clear' ||
                     item.key === 'timer' ||
+                    item.key === 'status_set' ||
+                    item.key === 'status_get' ||
                     item.key === 'image' ||
                     item.key === 'video' ||
                     item.key === 'audio' ||
@@ -1279,6 +1377,8 @@ export default function Welcome() {
                     item.key === 'video' ||
                     item.key === 'audio' ||
                     item.key === 'document' ||
+                    item.key === 'status_set' ||
+                    item.key === 'status_get' ||
                     item.key === 'timer'
             );
         }
@@ -1286,6 +1386,8 @@ export default function Welcome() {
             templates = createTemplates.filter(
                 (item) =>
                     item.key === 'condition' ||
+                    item.key === 'status_set' ||
+                    item.key === 'status_get' ||
                     item.key === 'message' ||
                     item.key === 'image' ||
                     item.key === 'video' ||
@@ -1302,12 +1404,28 @@ export default function Welcome() {
                     item.key === 'video' ||
                     item.key === 'audio' ||
                     item.key === 'document' ||
+                    item.key === 'status_set' ||
+                    item.key === 'status_get' ||
                     item.key === 'timer'
             );
         }
         if (sourceKind === 'message_button' || sourceKind === 'reply_button') {
             templates = createTemplates.filter(
                 (item) =>
+                    item.key === 'message' ||
+                    item.key === 'image' ||
+                    item.key === 'video' ||
+                    item.key === 'audio' ||
+                    item.key === 'document' ||
+                    item.key === 'status_set' ||
+                    item.key === 'status_get' ||
+                    item.key === 'timer'
+            );
+        }
+        if (sourceKind === 'status_set' || sourceKind === 'status_get') {
+            templates = createTemplates.filter(
+                (item) =>
+                    item.key === 'condition' ||
                     item.key === 'message' ||
                     item.key === 'image' ||
                     item.key === 'video' ||
@@ -1333,7 +1451,9 @@ export default function Welcome() {
                     item.key === 'image' ||
                     item.key === 'video' ||
                     item.key === 'audio' ||
-                    item.key === 'document'
+                    item.key === 'document' ||
+                    item.key === 'status_set' ||
+                    item.key === 'status_get'
             );
         }
         if (sourceKind === 'button_row') {
@@ -1357,6 +1477,8 @@ export default function Welcome() {
             { key: 'reply_button', label: 'Reply Button', description: 'Ответная кнопка', action: handleAddReplyButtonNode },
             { key: 'reply_clear', label: 'Clear Reply', description: 'Очистить reply-кнопки', action: handleAddReplyClearNode },
             { key: 'timer', label: 'Таймер', description: 'Задержка перед сообщением', action: handleAddTimerNode },
+            { key: 'status_set', label: 'Статус', description: 'Установить статус пользователя', action: handleAddStatusSetNode },
+            { key: 'status_get', label: 'Статус', description: 'Получить статус пользователя', action: handleAddStatusGetNode },
             { key: 'image', label: 'Изображения', description: 'Один или больше файлов', action: handleAddImageNode },
             { key: 'video', label: 'Видео', description: 'Видео файлы', action: handleAddVideoNode },
             { key: 'audio', label: 'Аудио', description: 'Аудио файлы', action: handleAddAudioNode },
@@ -1374,6 +1496,8 @@ export default function Welcome() {
             handleAddReplyButtonNode,
             handleAddReplyClearNode,
             handleAddTimerNode,
+            handleAddStatusSetNode,
+            handleAddStatusGetNode,
             handleAddImageNode,
             handleAddVideoNode,
             handleAddAudioNode,

@@ -16,7 +16,7 @@ export function MessageNode({ data, id }: NodeProps<NodeData>) {
                 <div className="text-sm font-semibold whitespace-break-spaces">{data.messageText ?? 'Привет'}</div>
             </div>
             <Handle type="source" position={Position.Right} style={{ width: 14, height: 14, borderWidth: 2, background: '#b45309' }} />
-            {data.canAddChild ? (
+            {/* {data.canAddChild ? (
                 <button
                     type="button"
                     onClick={(event) => {
@@ -28,7 +28,7 @@ export function MessageNode({ data, id }: NodeProps<NodeData>) {
                 >
                     <PlusIcon />
                 </button>
-            ) : null}
+            ) : null} */}
         </div>
     );
 }
