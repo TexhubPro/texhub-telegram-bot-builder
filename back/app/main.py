@@ -5,6 +5,7 @@ import json
 import os
 import sqlite3
 import uuid
+from urllib.parse import urlparse
 from typing import Dict, List, Optional, Tuple
 
 from aiogram import Bot as TelegramBot
@@ -19,6 +20,7 @@ from aiogram.types import (
     Message,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
+    FSInputFile,
 )
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,8 +40,6 @@ app.add_middleware(
 DB_PATH = os.getenv("BOT_DB", "bot_builder.db")
 UPLOAD_DIR = os.getenv("BOT_UPLOADS", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 
 class Flow(BaseModel):
@@ -309,6 +309,9 @@ async def upload_images(files: List[UploadFile] = File(...)) -> dict:
     return {"urls": urls}
 
 
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
+
 def collect_image_urls(flow: Flow, source_id: str) -> List[str]:
     nodes_by_id = {node.get("id"): node for node in flow.nodes}
     urls: List[str] = []
@@ -328,18 +331,46 @@ def collect_image_urls(flow: Flow, source_id: str) -> List[str]:
     return urls
 
 
+def resolve_image_source(url: str):
+    if not isinstance(url, str):
+        return None
+    cleaned = url.strip()
+    if not cleaned:
+        return None
+    if cleaned.startswith("/uploads/"):
+        filename = os.path.basename(cleaned)
+        path = os.path.join(UPLOAD_DIR, filename)
+        if os.path.exists(path):
+            return FSInputFile(path)
+        return cleaned
+    if cleaned.startswith("http://") or cleaned.startswith("https://"):
+        parsed = urlparse(cleaned)
+        if parsed.hostname in ("localhost", "127.0.0.1"):
+            filename = os.path.basename(parsed.path)
+            path = os.path.join(UPLOAD_DIR, filename)
+            if os.path.exists(path):
+                return FSInputFile(path)
+        return cleaned
+    path = os.path.join(UPLOAD_DIR, os.path.basename(cleaned))
+    if os.path.exists(path):
+        return FSInputFile(path)
+    return cleaned
+
+
 async def send_images(message: Message, urls: List[str], caption: str = "", reply_markup=None) -> bool:
-    if not urls:
+    sources = [resolve_image_source(url) for url in urls]
+    sources = [source for source in sources if source]
+    if not sources:
         return False
-    if len(urls) == 1:
-        await message.answer_photo(urls[0], caption=caption or None, reply_markup=reply_markup)
+    if len(sources) == 1:
+        await message.answer_photo(sources[0], caption=caption or None, reply_markup=reply_markup)
         return True
     media = []
-    for idx, url in enumerate(urls):
+    for idx, source in enumerate(sources):
         if idx == 0 and caption:
-            media.append(InputMediaPhoto(media=url, caption=caption))
+            media.append(InputMediaPhoto(media=source, caption=caption))
         else:
-            media.append(InputMediaPhoto(media=url))
+            media.append(InputMediaPhoto(media=source))
     await message.answer_media_group(media)
     return True
 
