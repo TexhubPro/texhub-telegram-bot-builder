@@ -796,6 +796,78 @@ export default function Welcome() {
         [setEdges]
     );
 
+    const handleDuplicateNodeById = useCallback(
+        (nodeId: string) => {
+            const node = nodes.find((item) => item.id === nodeId);
+            if (!node) {
+                return;
+            }
+            const clonedData = JSON.parse(JSON.stringify(node.data)) as NodeData;
+            const nextNode: Node<NodeData> = {
+                ...node,
+                id: generateId(node.type ?? 'node'),
+                position: { x: node.position.x + 40, y: node.position.y + 40 },
+                data: clonedData,
+            };
+            setNodes((nds) => nds.concat(nextNode));
+        },
+        [generateId, nodes, setNodes]
+    );
+
+    const handleSortLayout = useCallback(() => {
+        const levelById = new Map<string, number>();
+        nodes.forEach((node) => levelById.set(node.id, 0));
+        for (let i = 0; i < nodes.length; i += 1) {
+            let changed = false;
+            edges.forEach((edge) => {
+                const sourceLevel = levelById.get(edge.source) ?? 0;
+                const targetLevel = levelById.get(edge.target) ?? 0;
+                const nextLevel = sourceLevel + 1;
+                if (nextLevel > targetLevel) {
+                    levelById.set(edge.target, nextLevel);
+                    changed = true;
+                }
+            });
+            if (!changed) {
+                break;
+            }
+        }
+        const groups = new Map<number, Node<NodeData>[]>();
+        nodes.forEach((node) => {
+            const level = levelById.get(node.id) ?? 0;
+            const bucket = groups.get(level);
+            if (bucket) {
+                bucket.push(node);
+            } else {
+                groups.set(level, [node]);
+            }
+        });
+        const levels = Array.from(groups.keys()).sort((a, b) => a - b);
+        const START_X = 80;
+        const START_Y = 80;
+        const X_GAP = 260;
+        const Y_GAP = 140;
+        const positionById = new Map<string, { x: number; y: number }>();
+        levels.forEach((level) => {
+            const bucket = groups.get(level) ?? [];
+            bucket.forEach((node, index) => {
+                positionById.set(node.id, {
+                    x: START_X + level * X_GAP,
+                    y: START_Y + index * Y_GAP,
+                });
+            });
+        });
+        setNodes((nds) =>
+            nds.map((node) => {
+                const position = positionById.get(node.id);
+                if (!position) {
+                    return node;
+                }
+                return { ...node, position };
+            })
+        );
+    }, [edges, nodes, setNodes]);
+
 
     const handleStartBot = useCallback(async () => {
         if (!bot) {
@@ -1289,7 +1361,12 @@ export default function Welcome() {
                 <div className="pointer-events-none absolute right-[-80px] top-[-40px] h-80 w-80 rounded-full bg-[#6ee7b7]/40 blur-[110px]" />
                 <div className="pointer-events-none absolute bottom-[-120px] left-[40%] h-96 w-96 rounded-full bg-[#60a5fa]/30 blur-[120px]" />
 
-                <AppNavbar onSave={handleSaveFlow} onExport={handleExport} onImport={handleImportClick} />
+                <AppNavbar
+                    onSave={handleSaveFlow}
+                    onSort={handleSortLayout}
+                    onExport={handleExport}
+                    onImport={handleImportClick}
+                />
                 <div className="flex flex-1 overflow-hidden">
                     <Sidebar
                         searchTerm={searchTerm}
@@ -1304,6 +1381,7 @@ export default function Welcome() {
                                     onEditNode: handleEditNode,
                                     onDeleteNode: handleDeleteNodeById,
                                     onDeleteEdge: handleDeleteEdgeById,
+                                    onDuplicateNode: handleDuplicateNodeById,
                                 }}
                             >
                                 <main className="relative flex-1">

@@ -2,12 +2,13 @@
 
 type Props = {
     onSave: () => void;
+    onSort: () => void;
     onExport: () => void;
     onImport: () => void;
     logoRight?: string;
 };
 
-export function AppNavbar({ onSave, onExport, onImport, logoRight = 'n8n' }: Props) {
+export function AppNavbar({ onSave, onSort, onExport, onImport, logoRight = 'n8n' }: Props) {
     return (
         <Navbar className="border-b border-slate-200/70 bg-white/70 backdrop-blur">
             <NavbarBrand className="gap-3">
@@ -23,6 +24,11 @@ export function AppNavbar({ onSave, onExport, onImport, logoRight = 'n8n' }: Pro
                 <NavbarItem>
                     <Button size="sm" variant="flat" onPress={onSave}>
                         Сохранить
+                    </Button>
+                </NavbarItem>
+                <NavbarItem>
+                    <Button size="sm" variant="flat" onPress={onSort}>
+                        Сортировать
                     </Button>
                 </NavbarItem>
                 <NavbarItem>
