@@ -161,7 +161,18 @@ export function NodeEditorPanel({ node, values, onChange, onSave, onClose }: Pro
                                         <select
                                             value={values.conditionType}
                                             onChange={(event) =>
-                                                onChange({ ...values, conditionType: event.target.value })
+                                                onChange({
+                                                    ...values,
+                                                    conditionType: event.target.value,
+                                                    conditionLengthOp:
+                                                        event.target.value === 'has_text' || event.target.value === 'has_number'
+                                                            ? values.conditionLengthOp
+                                                            : '',
+                                                    conditionLengthValue:
+                                                        event.target.value === 'has_text' || event.target.value === 'has_number'
+                                                            ? values.conditionLengthValue
+                                                            : '',
+                                                })
                                             }
                                             className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
                                         >
@@ -188,36 +199,38 @@ export function NodeEditorPanel({ node, values, onChange, onSave, onClose }: Pro
                                             placeholder="Привет"
                                         />
                                     ) : null}
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <div className="flex flex-col gap-2">
-                                            <label className="block text-xs font-semibold text-slate-600">
-                                                Длина текста
-                                            </label>
-                                            <select
-                                                value={values.conditionLengthOp}
-                                                onChange={(event) =>
-                                                    onChange({ ...values, conditionLengthOp: event.target.value })
-                                                }
-                                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                                            >
-                                                <option value="">Без проверки</option>
-                                                <option value="lt">Меньше</option>
-                                                <option value="lte">Меньше или равно</option>
-                                                <option value="eq">Равно</option>
-                                                <option value="gte">Больше или равно</option>
-                                                <option value="gt">Больше</option>
-                                            </select>
+                                    {values.conditionType === 'has_text' || values.conditionType === 'has_number' ? (
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div className="flex flex-col gap-2">
+                                                <label className="block text-xs font-semibold text-slate-600">
+                                                    Длина текста
+                                                </label>
+                                                <select
+                                                    value={values.conditionLengthOp}
+                                                    onChange={(event) =>
+                                                        onChange({ ...values, conditionLengthOp: event.target.value })
+                                                    }
+                                                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                                                >
+                                                    <option value="">Без проверки</option>
+                                                    <option value="lt">Меньше</option>
+                                                    <option value="lte">Меньше или равно</option>
+                                                    <option value="eq">Равно</option>
+                                                    <option value="gte">Больше или равно</option>
+                                                    <option value="gt">Больше</option>
+                                                </select>
+                                            </div>
+                                            <FieldInput
+                                                label="Кол-во символов"
+                                                value={values.conditionLengthValue}
+                                                onChange={(value) => onChange({ ...values, conditionLengthValue: value })}
+                                                placeholder="5"
+                                                type="number"
+                                                min="0"
+                                                step="1"
+                                            />
                                         </div>
-                                        <FieldInput
-                                            label="Кол-во символов"
-                                            value={values.conditionLengthValue}
-                                            onChange={(value) => onChange({ ...values, conditionLengthValue: value })}
-                                            placeholder="5"
-                                            type="number"
-                                            min="0"
-                                            step="1"
-                                        />
-                                    </div>
+                                    ) : null}
                                 </div>
                             ) : null}
                             {kind === 'image' ? (

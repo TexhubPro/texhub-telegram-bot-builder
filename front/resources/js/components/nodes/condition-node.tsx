@@ -44,7 +44,9 @@ export function ConditionNode({ data, id }: NodeProps<NodeData>) {
             <div className="min-w-[170px]">
                 <div className="text-xs font-semibold tracking-wide text-fuchsia-600 uppercase">Проверка</div>
                 <div className="text-sm font-semibold">{typeLabel}</div>
-                {lengthLabel ? <div className="text-xs text-fuchsia-600">Длина {lengthLabel}</div> : null}
+                {(data.conditionType === 'has_text' || data.conditionType === 'has_number') && lengthLabel ? (
+                    <div className="text-xs text-fuchsia-600">Длина {lengthLabel}</div>
+                ) : null}
             </div>
             <Handle
                 type="source"

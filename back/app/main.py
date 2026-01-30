@@ -345,7 +345,7 @@ def match_condition(message: Message, node: dict, bot_id: Optional[str] = None, 
 
     length_op = data.get("conditionLengthOp")
     length_value = data.get("conditionLengthValue")
-    if length_op and length_value is not None:
+    if length_op and length_value is not None and condition_type in ("has_text", "has_number"):
         try:
             length_value = int(length_value)
             length_actual = len(text_value)
