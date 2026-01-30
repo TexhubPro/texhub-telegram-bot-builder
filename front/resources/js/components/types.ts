@@ -31,6 +31,14 @@ export type NodeData = {
     documentUrls?: string[];
     timerSeconds?: number;
     conditionText?: string;
+    conditionHasText?: boolean;
+    conditionHasNumber?: boolean;
+    conditionHasPhoto?: boolean;
+    conditionHasVideo?: boolean;
+    conditionHasAudio?: boolean;
+    conditionHasLocation?: boolean;
+    conditionMinLength?: number;
+    conditionMaxLength?: number;
     canAddChild?: boolean;
 };
 

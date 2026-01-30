@@ -21,6 +21,14 @@ type Values = {
     documentUrls: string[];
     documentFiles: File[];
     conditionText: string;
+    conditionHasText: boolean;
+    conditionHasNumber: boolean;
+    conditionHasPhoto: boolean;
+    conditionHasVideo: boolean;
+    conditionHasAudio: boolean;
+    conditionHasLocation: boolean;
+    conditionMinLength: string;
+    conditionMaxLength: string;
 };
 
 type Props = {
@@ -126,12 +134,96 @@ export function NodeEditorPanel({ node, values, onChange, onSave, onClose }: Pro
                                 />
                             ) : null}
                             {kind === 'condition' ? (
-                                <FieldInput
-                                    label="Текст для проверки"
-                                    value={values.conditionText}
-                                    onChange={(value) => onChange({ ...values, conditionText: value })}
-                                    placeholder="Привет"
-                                />
+                                <div className="flex flex-col gap-3">
+                                    <FieldInput
+                                        label="Текст (точное совпадение)"
+                                        value={values.conditionText}
+                                        onChange={(value) => onChange({ ...values, conditionText: value })}
+                                        placeholder="Привет"
+                                    />
+                                    <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
+                                        <label className="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={values.conditionHasText}
+                                                onChange={(event) =>
+                                                    onChange({ ...values, conditionHasText: event.target.checked })
+                                                }
+                                            />
+                                            Есть текст
+                                        </label>
+                                        <label className="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={values.conditionHasNumber}
+                                                onChange={(event) =>
+                                                    onChange({ ...values, conditionHasNumber: event.target.checked })
+                                                }
+                                            />
+                                            Есть номер
+                                        </label>
+                                        <label className="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={values.conditionHasPhoto}
+                                                onChange={(event) =>
+                                                    onChange({ ...values, conditionHasPhoto: event.target.checked })
+                                                }
+                                            />
+                                            Есть фото
+                                        </label>
+                                        <label className="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={values.conditionHasVideo}
+                                                onChange={(event) =>
+                                                    onChange({ ...values, conditionHasVideo: event.target.checked })
+                                                }
+                                            />
+                                            Есть видео
+                                        </label>
+                                        <label className="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={values.conditionHasAudio}
+                                                onChange={(event) =>
+                                                    onChange({ ...values, conditionHasAudio: event.target.checked })
+                                                }
+                                            />
+                                            Есть аудио
+                                        </label>
+                                        <label className="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={values.conditionHasLocation}
+                                                onChange={(event) =>
+                                                    onChange({ ...values, conditionHasLocation: event.target.checked })
+                                                }
+                                            />
+                                            Есть гео
+                                        </label>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <FieldInput
+                                            label="Мин. длина"
+                                            value={values.conditionMinLength}
+                                            onChange={(value) => onChange({ ...values, conditionMinLength: value })}
+                                            placeholder="0"
+                                            type="number"
+                                            min="0"
+                                            step="1"
+                                        />
+                                        <FieldInput
+                                            label="Макс. длина"
+                                            value={values.conditionMaxLength}
+                                            onChange={(value) => onChange({ ...values, conditionMaxLength: value })}
+                                            placeholder="100"
+                                            type="number"
+                                            min="0"
+                                            step="1"
+                                        />
+                                    </div>
+                                </div>
                             ) : null}
                             {kind === 'image' ? (
                                 <div className="flex flex-col gap-3">

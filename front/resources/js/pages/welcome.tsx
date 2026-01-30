@@ -127,6 +127,14 @@ const buildEditorValues = (node: Node<NodeData>) => ({
     documentUrls: node.data.documentUrls ?? [],
     documentFiles: [] as File[],
     conditionText: node.data.conditionText ?? '',
+    conditionHasText: node.data.conditionHasText ?? false,
+    conditionHasNumber: node.data.conditionHasNumber ?? false,
+    conditionHasPhoto: node.data.conditionHasPhoto ?? false,
+    conditionHasVideo: node.data.conditionHasVideo ?? false,
+    conditionHasAudio: node.data.conditionHasAudio ?? false,
+    conditionHasLocation: node.data.conditionHasLocation ?? false,
+    conditionMinLength: node.data.conditionMinLength !== undefined ? String(node.data.conditionMinLength) : '',
+    conditionMaxLength: node.data.conditionMaxLength !== undefined ? String(node.data.conditionMaxLength) : '',
     timerSeconds: node.data.timerSeconds !== undefined ? String(node.data.timerSeconds) : '',
 });
 
@@ -152,6 +160,14 @@ export default function Welcome() {
         documentUrls: [] as string[],
         documentFiles: [] as File[],
         conditionText: '',
+        conditionHasText: false,
+        conditionHasNumber: false,
+        conditionHasPhoto: false,
+        conditionHasVideo: false,
+        conditionHasAudio: false,
+        conditionHasLocation: false,
+        conditionMinLength: '',
+        conditionMaxLength: '',
         timerSeconds: '',
     });
     const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -683,7 +699,29 @@ export default function Welcome() {
                         return { ...node, data: { ...node.data, documentUrls: editorValues.documentUrls } };
                     }
                     if (kind === 'condition') {
-                        return { ...node, data: { ...node.data, conditionText: editorValues.conditionText } };
+                        const minValue =
+                            editorValues.conditionMinLength.trim() === ''
+                                ? undefined
+                                : Number(editorValues.conditionMinLength);
+                        const maxValue =
+                            editorValues.conditionMaxLength.trim() === ''
+                                ? undefined
+                                : Number(editorValues.conditionMaxLength);
+                        return {
+                            ...node,
+                            data: {
+                                ...node.data,
+                                conditionText: editorValues.conditionText,
+                                conditionHasText: editorValues.conditionHasText,
+                                conditionHasNumber: editorValues.conditionHasNumber,
+                                conditionHasPhoto: editorValues.conditionHasPhoto,
+                                conditionHasVideo: editorValues.conditionHasVideo,
+                                conditionHasAudio: editorValues.conditionHasAudio,
+                                conditionHasLocation: editorValues.conditionHasLocation,
+                                conditionMinLength: Number.isFinite(minValue) ? Math.max(0, minValue) : undefined,
+                                conditionMaxLength: Number.isFinite(maxValue) ? Math.max(0, maxValue) : undefined,
+                            },
+                        };
                     }
                     return node;
                 })
@@ -798,20 +836,24 @@ export default function Welcome() {
 
     const handleDuplicateNodeById = useCallback(
         (nodeId: string) => {
-            const node = nodes.find((item) => item.id === nodeId);
-            if (!node) {
-                return;
-            }
-            const clonedData = JSON.parse(JSON.stringify(node.data)) as NodeData;
-            const nextNode: Node<NodeData> = {
-                ...node,
-                id: generateId(node.type ?? 'node'),
-                position: { x: node.position.x + 40, y: node.position.y + 40 },
-                data: clonedData,
-            };
-            setNodes((nds) => nds.concat(nextNode));
+            setNodes((nds) => {
+                const node = nds.find((item) => item.id === nodeId);
+                if (!node) {
+                    return nds;
+                }
+                const clonedData = JSON.parse(JSON.stringify(node.data)) as NodeData;
+                const nextNode: Node<NodeData> = {
+                    ...node,
+                    id: generateId(node.type ?? 'node'),
+                    position: { x: node.position.x + 40, y: node.position.y + 40 },
+                    data: clonedData,
+                    selected: true,
+                };
+                const deselected = nds.map((item) => ({ ...item, selected: false }));
+                return deselected.concat(nextNode);
+            });
         },
-        [generateId, nodes, setNodes]
+        [generateId, setNodes]
     );
 
     const handleSortLayout = useCallback(() => {
