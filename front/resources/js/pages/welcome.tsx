@@ -50,7 +50,7 @@ import { Sidebar } from '../components/sidebar/sidebar';
 import { DeletableEdge } from '../components/edges/deletable-edge';
 import type { Bot, ContextMenu, NodeData, NodeKind } from '../components/types';
 
-const API_BASE = 'http://localhost:8001';
+const API_BASE = 'https://toocars.tj';
 
 const initialNodes: Node<NodeData>[] = [];
 const initialEdges: Edge[] = [];
@@ -2797,3 +2797,5 @@ export default function Welcome() {
         </>
     );
 }
+
+

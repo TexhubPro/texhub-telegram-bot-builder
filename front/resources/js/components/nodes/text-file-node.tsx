@@ -5,7 +5,7 @@ import { DownloadIcon, UploadIcon } from '../ui/icons';
 import { GraphActionsContext } from './graph-actions-context';
 import type { NodeData } from '../types';
 
-const API_BASE = 'http://localhost:8001';
+const API_BASE = 'https://toocars.tj';
 
 export function TextFileNode({ data, id }: NodeProps<NodeData>) {
     const name = (data.fileName || '').trim();
@@ -112,3 +112,5 @@ export function TextFileNode({ data, id }: NodeProps<NodeData>) {
         </div>
     );
 }
+
+

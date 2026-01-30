@@ -140,7 +140,7 @@ export function NodeEditorPanel({ node, values, chatOptions, subscriptionOptions
             return;
         }
         const type = kind === 'excel_file' ? 'excel' : 'text';
-        const url = `http://localhost:8001/bots/${botId}/files/${type}/${encodeURIComponent(name)}`;
+        const url = `https://toocars.tj/bots/${botId}/files/${type}/${encodeURIComponent(name)}`;
         window.open(url, '_blank');
     };
     const handleUploadFile = async (file: File) => {
@@ -168,7 +168,7 @@ export function NodeEditorPanel({ node, values, chatOptions, subscriptionOptions
             const form = new FormData();
             form.append('file', file);
             const type = kind === 'excel_file' ? 'excel' : 'text';
-            const response = await fetch(`http://localhost:8001/bots/${botId}/files/${type}/upload`, {
+            const response = await fetch(`https://toocars.tj/bots/${botId}/files/${type}/upload`, {
                 method: 'POST',
                 body: form,
             });
@@ -841,6 +841,8 @@ export function NodeEditorPanel({ node, values, chatOptions, subscriptionOptions
         </aside>
     );
 }
+
+
 
 
 
