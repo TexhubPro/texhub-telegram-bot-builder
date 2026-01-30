@@ -199,6 +199,23 @@ def get_user_status(bot_id: str, user_id: int) -> str:
     return (row["status"] or "").strip()
 
 
+def list_users(bot_id: str) -> List[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT user_id, username, first_name, last_name FROM user_status WHERE bot_id = ? ORDER BY updated_at DESC",
+            (bot_id,),
+        ).fetchall()
+    return [
+        {
+            "id": row["user_id"],
+            "username": row["username"],
+            "first_name": row["first_name"],
+            "last_name": row["last_name"],
+        }
+        for row in rows
+    ]
+
+
 async def fetch_profile_photo_id(telegram_bot: TelegramBot, user_id: int) -> Optional[str]:
     try:
         photos = await telegram_bot.get_user_profile_photos(user_id, limit=1)
@@ -272,6 +289,28 @@ def normalize_command(text: str) -> str:
     return value.lower()
 
 
+def render_template(text: str, message: Message, user: Optional[object] = None) -> str:
+    if not text:
+        return ""
+    source = user or message.from_user
+    first_name = getattr(source, "first_name", "") if source else ""
+    last_name = getattr(source, "last_name", "") if source else ""
+    username = getattr(source, "username", "") if source else ""
+    chat_id = message.chat.id if message.chat else ""
+    replacements = {
+        "{name}": first_name,
+        "{first_name}": first_name,
+        "{last_name}": last_name,
+        "{username}": f"@{username}" if username else "",
+        "{chat_id}": str(chat_id),
+        "{full_name}": " ".join(part for part in [first_name, last_name] if part),
+    }
+    result = text
+    for key, value in replacements.items():
+        result = result.replace(key, value)
+    return result
+
+
 def find_command_node(flow: Flow, command: str) -> Optional[dict]:
     command_lower = command.lower()
     for node in flow.nodes:
@@ -297,6 +336,16 @@ def parse_timer_seconds(node: dict) -> float:
     except (TypeError, ValueError):
         value = 0.0
     return max(0.0, value)
+
+
+def parse_chat_id(node: dict) -> Optional[int]:
+    data = node.get("data", {})
+    raw = data.get("chatId")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value
 
 
 def match_condition(message: Message, node: dict, bot_id: Optional[str] = None, user_id: Optional[int] = None) -> bool:
@@ -373,22 +422,26 @@ def collect_content_targets_with_delay(
     message: Message | None = None,
     bot_id: Optional[str] = None,
     user_id: Optional[int] = None,
-) -> List[Tuple[dict, float]]:
+) -> List[Tuple[dict, float, Optional[int]]]:
     nodes_by_id = {node.get("id"): node for node in flow.nodes}
-    results: List[Tuple[dict, float]] = []
-    seen_targets: set[str] = set()
-    visited: set[str] = set()
-    queue: List[Tuple[str, float]] = [(source_id, 0.0)]
+    results: List[Tuple[dict, float, Optional[int]]] = []
+    seen_targets: set[tuple[str, Optional[int]]] = set()
+    visited: set[tuple[str, Optional[int]]] = set()
+    queue: List[Tuple[str, float, Optional[int]]] = [(source_id, 0.0, None)]
     effective_user_id = user_id
     if effective_user_id is None and message and message.from_user:
         effective_user_id = message.from_user.id
     while queue:
-        current_id, delay = queue.pop(0)
-        if not current_id or current_id in visited:
+        current_id, delay, target_chat_id = queue.pop(0)
+        if not current_id or (current_id, target_chat_id) in visited:
             continue
-        visited.add(current_id)
+        visited.add((current_id, target_chat_id))
         current_node = nodes_by_id.get(current_id)
         current_kind = current_node.get("data", {}).get("kind") if current_node else None
+        if current_kind == "chat" and current_node:
+            override_chat_id = parse_chat_id(current_node)
+            if override_chat_id is not None:
+                target_chat_id = override_chat_id
         condition_pass = None
         if current_kind == "condition" and message:
             condition_pass = match_condition(message, current_node, bot_id, effective_user_id)
@@ -406,14 +459,15 @@ def collect_content_targets_with_delay(
             kind = target_node.get("data", {}).get("kind")
             if kind in ("message", "image", "video", "audio", "document", "delete_message", "edit_message"):
                 target_id = target_node.get("id") or ""
-                if target_id and target_id not in seen_targets:
-                    seen_targets.add(target_id)
-                    results.append((target_node, delay))
+                key = (target_id, target_chat_id)
+                if target_id and key not in seen_targets:
+                    seen_targets.add(key)
+                    results.append((target_node, delay, target_chat_id))
             elif kind == "timer":
                 next_delay = delay + parse_timer_seconds(target_node)
-                queue.append((target_node.get("id") or "", next_delay))
+                queue.append((target_node.get("id") or "", next_delay, target_chat_id))
             elif kind == "condition":
-                queue.append((target_node.get("id") or "", delay))
+                queue.append((target_node.get("id") or "", delay, target_chat_id))
             elif kind == "status_set":
                 if bot_id and effective_user_id is not None:
                     set_user_status(
@@ -421,9 +475,11 @@ def collect_content_targets_with_delay(
                         effective_user_id,
                         target_node.get("data", {}).get("statusValue") or "",
                     )
-                queue.append((target_node.get("id") or "", delay))
+                queue.append((target_node.get("id") or "", delay, target_chat_id))
             elif kind == "status_get":
-                queue.append((target_node.get("id") or "", delay))
+                queue.append((target_node.get("id") or "", delay, target_chat_id))
+            elif kind == "chat":
+                queue.append((target_node.get("id") or "", delay, target_chat_id))
     return results
 
 
@@ -616,13 +672,24 @@ def resolve_upload_source(url: str):
     return cleaned
 
 
-async def send_images(message: Message, urls: List[str], caption: str = "", reply_markup=None) -> bool:
+async def send_images(
+    message: Message,
+    urls: List[str],
+    caption: str = "",
+    reply_markup=None,
+    target_chat_id: Optional[int] = None,
+) -> bool:
     sources = [resolve_upload_source(url) for url in urls]
     sources = [source for source in sources if source]
     if not sources:
         return False
+    chat_id = target_chat_id if target_chat_id is not None else message.chat.id
+    use_bot = target_chat_id is not None and message.chat and target_chat_id != message.chat.id
     if len(sources) == 1:
-        await message.answer_photo(sources[0], caption=caption or None, reply_markup=reply_markup)
+        if use_bot:
+            await message.bot.send_photo(chat_id, sources[0], caption=caption or None, reply_markup=reply_markup)
+        else:
+            await message.answer_photo(sources[0], caption=caption or None, reply_markup=reply_markup)
         return True
     media = []
     for idx, source in enumerate(sources):
@@ -630,17 +697,31 @@ async def send_images(message: Message, urls: List[str], caption: str = "", repl
             media.append(InputMediaPhoto(media=source, caption=caption))
         else:
             media.append(InputMediaPhoto(media=source))
-    await message.answer_media_group(media)
+    if use_bot:
+        await message.bot.send_media_group(chat_id, media)
+    else:
+        await message.answer_media_group(media)
     return True
 
 
-async def send_videos(message: Message, urls: List[str], caption: str = "", reply_markup=None) -> bool:
+async def send_videos(
+    message: Message,
+    urls: List[str],
+    caption: str = "",
+    reply_markup=None,
+    target_chat_id: Optional[int] = None,
+) -> bool:
     sources = [resolve_upload_source(url) for url in urls]
     sources = [source for source in sources if source]
     if not sources:
         return False
+    chat_id = target_chat_id if target_chat_id is not None else message.chat.id
+    use_bot = target_chat_id is not None and message.chat and target_chat_id != message.chat.id
     if len(sources) == 1:
-        await message.answer_video(sources[0], caption=caption or None, reply_markup=reply_markup)
+        if use_bot:
+            await message.bot.send_video(chat_id, sources[0], caption=caption or None, reply_markup=reply_markup)
+        else:
+            await message.answer_video(sources[0], caption=caption or None, reply_markup=reply_markup)
         return True
     media = []
     for idx, source in enumerate(sources):
@@ -648,17 +729,31 @@ async def send_videos(message: Message, urls: List[str], caption: str = "", repl
             media.append(InputMediaVideo(media=source, caption=caption))
         else:
             media.append(InputMediaVideo(media=source))
-    await message.answer_media_group(media)
+    if use_bot:
+        await message.bot.send_media_group(chat_id, media)
+    else:
+        await message.answer_media_group(media)
     return True
 
 
-async def send_audios(message: Message, urls: List[str], caption: str = "", reply_markup=None) -> bool:
+async def send_audios(
+    message: Message,
+    urls: List[str],
+    caption: str = "",
+    reply_markup=None,
+    target_chat_id: Optional[int] = None,
+) -> bool:
     sources = [resolve_upload_source(url) for url in urls]
     sources = [source for source in sources if source]
     if not sources:
         return False
+    chat_id = target_chat_id if target_chat_id is not None else message.chat.id
+    use_bot = target_chat_id is not None and message.chat and target_chat_id != message.chat.id
     if len(sources) == 1:
-        await message.answer_audio(sources[0], caption=caption or None, reply_markup=reply_markup)
+        if use_bot:
+            await message.bot.send_audio(chat_id, sources[0], caption=caption or None, reply_markup=reply_markup)
+        else:
+            await message.answer_audio(sources[0], caption=caption or None, reply_markup=reply_markup)
         return True
     media = []
     for idx, source in enumerate(sources):
@@ -666,17 +761,31 @@ async def send_audios(message: Message, urls: List[str], caption: str = "", repl
             media.append(InputMediaAudio(media=source, caption=caption))
         else:
             media.append(InputMediaAudio(media=source))
-    await message.answer_media_group(media)
+    if use_bot:
+        await message.bot.send_media_group(chat_id, media)
+    else:
+        await message.answer_media_group(media)
     return True
 
 
-async def send_documents(message: Message, urls: List[str], caption: str = "", reply_markup=None) -> bool:
+async def send_documents(
+    message: Message,
+    urls: List[str],
+    caption: str = "",
+    reply_markup=None,
+    target_chat_id: Optional[int] = None,
+) -> bool:
     sources = [resolve_upload_source(url) for url in urls]
     sources = [source for source in sources if source]
     if not sources:
         return False
+    chat_id = target_chat_id if target_chat_id is not None else message.chat.id
+    use_bot = target_chat_id is not None and message.chat and target_chat_id != message.chat.id
     if len(sources) == 1:
-        await message.answer_document(sources[0], caption=caption or None, reply_markup=reply_markup)
+        if use_bot:
+            await message.bot.send_document(chat_id, sources[0], caption=caption or None, reply_markup=reply_markup)
+        else:
+            await message.answer_document(sources[0], caption=caption or None, reply_markup=reply_markup)
         return True
     media = []
     for idx, source in enumerate(sources):
@@ -684,11 +793,20 @@ async def send_documents(message: Message, urls: List[str], caption: str = "", r
             media.append(InputMediaDocument(media=source, caption=caption))
         else:
             media.append(InputMediaDocument(media=source))
-    await message.answer_media_group(media)
+    if use_bot:
+        await message.bot.send_media_group(chat_id, media)
+    else:
+        await message.answer_media_group(media)
     return True
 
 
-async def send_content_node(flow: Flow, message: Message, target_node: dict) -> None:
+async def send_content_node(
+    flow: Flow,
+    message: Message,
+    target_node: dict,
+    target_chat_id: Optional[int] = None,
+    source_user: Optional[object] = None,
+) -> None:
     payload = target_node.get("data", {})
     kind = payload.get("kind")
     if kind == "delete_message":
@@ -704,7 +822,8 @@ async def send_content_node(flow: Flow, message: Message, target_node: dict) -> 
                 await message.delete()
             except Exception:
                 pass
-        message_text = (payload.get("editMessageText") if is_edit else payload.get("messageText") or "").strip()
+        raw_text = payload.get("editMessageText") if is_edit else payload.get("messageText")
+        message_text = render_template((raw_text or "").strip(), message, source_user)
         image_urls = collect_image_urls(flow, target_node.get("id") or "")
         video_urls = collect_video_urls(flow, target_node.get("id") or "")
         audio_urls = collect_audio_urls(flow, target_node.get("id") or "")
@@ -714,53 +833,80 @@ async def send_content_node(flow: Flow, message: Message, target_node: dict) -> 
         reply_used = False
         if image_urls:
             caption = message_text if message_text and not caption_used else ""
-            await send_images(message, image_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+            await send_images(
+                message,
+                image_urls,
+                caption=caption,
+                reply_markup=reply_markup if not reply_used else None,
+                target_chat_id=target_chat_id,
+            )
             if caption:
                 caption_used = True
                 reply_used = True
         if video_urls:
             caption = message_text if message_text and not caption_used else ""
-            await send_videos(message, video_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+            await send_videos(
+                message,
+                video_urls,
+                caption=caption,
+                reply_markup=reply_markup if not reply_used else None,
+                target_chat_id=target_chat_id,
+            )
             if caption:
                 caption_used = True
                 reply_used = True
         if audio_urls:
             caption = message_text if message_text and not caption_used else ""
-            await send_audios(message, audio_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+            await send_audios(
+                message,
+                audio_urls,
+                caption=caption,
+                reply_markup=reply_markup if not reply_used else None,
+                target_chat_id=target_chat_id,
+            )
             if caption:
                 caption_used = True
                 reply_used = True
         if document_urls:
             caption = message_text if message_text and not caption_used else ""
-            await send_documents(message, document_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+            await send_documents(
+                message,
+                document_urls,
+                caption=caption,
+                reply_markup=reply_markup if not reply_used else None,
+                target_chat_id=target_chat_id,
+            )
             if caption:
                 caption_used = True
                 reply_used = True
         if not (image_urls or video_urls or audio_urls or document_urls):
             if message_text:
-                await message.answer(message_text, reply_markup=reply_markup)
+                if target_chat_id is not None and message.chat and target_chat_id != message.chat.id:
+                    await message.bot.send_message(target_chat_id, message_text, reply_markup=reply_markup)
+                else:
+                    await message.answer(message_text, reply_markup=reply_markup)
         return
     if kind == "image":
         urls = payload.get("imageUrls") or []
         reply_markup = build_reply_markup(flow, target_node.get("id") or "")
-        await send_images(message, urls, reply_markup=reply_markup)
+        await send_images(message, urls, reply_markup=reply_markup, target_chat_id=target_chat_id)
         return
     if kind == "video":
         urls = payload.get("videoUrls") or []
         reply_markup = build_reply_markup(flow, target_node.get("id") or "")
-        await send_videos(message, urls, reply_markup=reply_markup)
+        await send_videos(message, urls, reply_markup=reply_markup, target_chat_id=target_chat_id)
         return
     if kind == "audio":
         urls = payload.get("audioUrls") or []
         reply_markup = build_reply_markup(flow, target_node.get("id") or "")
-        await send_audios(message, urls, reply_markup=reply_markup)
+        await send_audios(message, urls, reply_markup=reply_markup, target_chat_id=target_chat_id)
         return
     if kind == "document":
         urls = payload.get("documentUrls") or []
         reply_markup = build_reply_markup(flow, target_node.get("id") or "")
-        await send_documents(message, urls, reply_markup=reply_markup)
+        await send_documents(message, urls, reply_markup=reply_markup, target_chat_id=target_chat_id)
         return
-    message_text = (payload.get("messageText") or "").strip()
+    message_text = render_template((payload.get("messageText") or "").strip(), message, source_user)
     image_urls = collect_image_urls(flow, target_node.get("id") or "")
     video_urls = collect_video_urls(flow, target_node.get("id") or "")
     audio_urls = collect_audio_urls(flow, target_node.get("id") or "")
@@ -770,44 +916,76 @@ async def send_content_node(flow: Flow, message: Message, target_node: dict) -> 
     reply_used = False
     if image_urls:
         caption = message_text if message_text and not caption_used else ""
-        await send_images(message, image_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+        await send_images(
+            message,
+            image_urls,
+            caption=caption,
+            reply_markup=reply_markup if not reply_used else None,
+            target_chat_id=target_chat_id,
+        )
         if caption:
             caption_used = True
             reply_used = True
     if video_urls:
         caption = message_text if message_text and not caption_used else ""
-        await send_videos(message, video_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+        await send_videos(
+            message,
+            video_urls,
+            caption=caption,
+            reply_markup=reply_markup if not reply_used else None,
+            target_chat_id=target_chat_id,
+        )
         if caption:
             caption_used = True
             reply_used = True
     if audio_urls:
         caption = message_text if message_text and not caption_used else ""
-        await send_audios(message, audio_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+        await send_audios(
+            message,
+            audio_urls,
+            caption=caption,
+            reply_markup=reply_markup if not reply_used else None,
+            target_chat_id=target_chat_id,
+        )
         if caption:
             caption_used = True
             reply_used = True
     if document_urls:
         caption = message_text if message_text and not caption_used else ""
-        await send_documents(message, document_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+        await send_documents(
+            message,
+            document_urls,
+            caption=caption,
+            reply_markup=reply_markup if not reply_used else None,
+            target_chat_id=target_chat_id,
+        )
         if caption:
             caption_used = True
             reply_used = True
     if not (image_urls or video_urls or audio_urls or document_urls):
         if message_text:
-            await message.answer(message_text, reply_markup=reply_markup)
+            if target_chat_id is not None and message.chat and target_chat_id != message.chat.id:
+                await message.bot.send_message(target_chat_id, message_text, reply_markup=reply_markup)
+            else:
+                await message.answer(message_text, reply_markup=reply_markup)
 
 
-async def send_targets_with_delay(flow: Flow, message: Message, targets: List[Tuple[dict, float]]) -> None:
+async def send_targets_with_delay(
+    flow: Flow,
+    message: Message,
+    targets: List[Tuple[dict, float, Optional[int]]],
+    source_user: Optional[object] = None,
+) -> None:
     if not targets:
         return
     ordered = sorted(targets, key=lambda item: item[1])
     elapsed = 0.0
-    for target_node, delay in ordered:
+    for target_node, delay, target_chat_id in ordered:
         wait_time = delay - elapsed
         if wait_time > 0:
             await asyncio.sleep(wait_time)
             elapsed = delay
-        await send_content_node(flow, message, target_node)
+        await send_content_node(flow, message, target_node, target_chat_id, source_user)
 
 
 async def run_bot_polling(bot: Bot) -> None:
@@ -824,22 +1002,22 @@ async def run_bot_polling(bot: Bot) -> None:
             command_node = find_command_node(flow, command)
             if command_node:
                 targets = collect_content_targets_with_delay(flow, command_node.get("id") or "", message, bot.id, user_id)
-                await send_targets_with_delay(flow, message, targets)
+                await send_targets_with_delay(flow, message, targets, message.from_user)
                 return
         reply_button = find_reply_button_by_text(flow, message.text or "")
         if reply_button:
             targets = collect_content_targets_with_delay(flow, reply_button.get("id") or "", message, bot.id, user_id)
             if targets:
-                await send_targets_with_delay(flow, message, targets)
+                await send_targets_with_delay(flow, message, targets, message.from_user)
                 return
         webhook_nodes = [node for node in flow.nodes if node.get("data", {}).get("kind") == "webhook"]
         if webhook_nodes:
-            all_targets: List[Tuple[dict, float]] = []
+            all_targets: List[Tuple[dict, float, Optional[int]]] = []
             for webhook_node in webhook_nodes:
                 all_targets.extend(
                     collect_content_targets_with_delay(flow, webhook_node.get("id") or "", message, bot.id, user_id)
                 )
-            await send_targets_with_delay(flow, message, all_targets)
+            await send_targets_with_delay(flow, message, all_targets, message.from_user)
 
     dispatcher.message()(handler)
 
@@ -856,7 +1034,7 @@ async def run_bot_polling(bot: Bot) -> None:
         if data.startswith("btn:"):
             button_id = data[4:]
             targets = collect_content_targets_with_delay(flow, button_id, query.message, bot.id, user_id)
-            await send_targets_with_delay(flow, query.message, targets)
+            await send_targets_with_delay(flow, query.message, targets, query.from_user)
             return
         if data.startswith("/"):
             flow = FLOW_CACHE.get(bot.id) or bot.flow
@@ -865,7 +1043,7 @@ async def run_bot_polling(bot: Bot) -> None:
                 command_node = find_command_node(flow, command)
                 if command_node:
                     targets = collect_content_targets_with_delay(flow, command_node.get("id") or "", query.message, bot.id, user_id)
-                    await send_targets_with_delay(flow, query.message, targets)
+                    await send_targets_with_delay(flow, query.message, targets, query.from_user)
                 return
         await query.message.answer(data)
 
@@ -928,6 +1106,12 @@ def list_bots() -> List[Bot]:
 @app.get("/bots/{bot_id}", response_model=Bot)
 def get_bot(bot_id: str) -> Bot:
     return get_bot_or_404(bot_id)
+
+
+@app.get("/bots/{bot_id}/users")
+def list_bot_users(bot_id: str) -> List[dict]:
+    get_bot_or_404(bot_id)
+    return list_users(bot_id)
 
 
 @app.patch("/bots/{bot_id}", response_model=Bot)

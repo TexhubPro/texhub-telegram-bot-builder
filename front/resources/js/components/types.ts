@@ -11,6 +11,7 @@ export type NodeKind =
     | 'document'
     | 'delete_message'
     | 'edit_message'
+    | 'chat'
     | 'status_set'
     | 'status_get'
     | 'webhook'
@@ -34,6 +35,8 @@ export type NodeData = {
     audioUrls?: string[];
     documentUrls?: string[];
     editMessageText?: string;
+    chatId?: number;
+    chatTitle?: string;
     statusValue?: string;
     timerSeconds?: number;
     conditionText?: string;

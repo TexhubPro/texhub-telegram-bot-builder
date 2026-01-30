@@ -22,6 +22,7 @@ type Values = {
     documentFiles: File[];
     statusValue: string;
     editMessageText: string;
+    chatId: string;
     conditionText: string;
     conditionType: string;
     conditionLengthOp: string;
@@ -31,6 +32,7 @@ type Values = {
 type Props = {
     node: Node<NodeData> | null;
     values: Values;
+    chatOptions: { id: number; label: string }[];
     onChange: (values: Values) => void;
     onSave: () => void;
     onClose: () => void;
@@ -58,6 +60,8 @@ const getTitle = (kind?: NodeKind) => {
             return 'Удалить сообщение';
         case 'edit_message':
             return 'Изменить сообщение';
+        case 'chat':
+            return 'Чат';
         case 'status_set':
             return 'Статус';
         case 'status_get':
@@ -73,7 +77,7 @@ const getTitle = (kind?: NodeKind) => {
     }
 };
 
-export function NodeEditorPanel({ node, values, onChange, onSave, onClose }: Props) {
+export function NodeEditorPanel({ node, values, chatOptions, onChange, onSave, onClose }: Props) {
     if (!node) {
         return (
             <aside className="w-80 border-l border-slate-200/70 bg-white/80 p-4 backdrop-blur">
@@ -145,6 +149,23 @@ export function NodeEditorPanel({ node, values, onChange, onSave, onClose }: Pro
                                     onChange={(value) => onChange({ ...values, editMessageText: value })}
                                     placeholder="Новый текст"
                                 />
+                            ) : null}
+                            {kind === 'chat' ? (
+                                <div className="flex flex-col gap-2">
+                                    <label className="block text-xs font-semibold text-slate-600">Чат</label>
+                                    <select
+                                        value={values.chatId}
+                                        onChange={(event) => onChange({ ...values, chatId: event.target.value })}
+                                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                                    >
+                                        <option value="">Выбери чат</option>
+                                        {chatOptions.map((option) => (
+                                            <option key={option.id} value={option.id}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
                             ) : null}
                             {kind === 'status_set' ? (
                                 <FieldInput

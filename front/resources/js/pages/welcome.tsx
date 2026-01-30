@@ -22,6 +22,7 @@ import { ConditionNode } from '../components/nodes/condition-node';
 import { NodeContextMenu } from '../components/nodes/context-menu';
 import { GraphActionsContext } from '../components/nodes/graph-actions-context';
 import { AudioNode } from '../components/nodes/audio-node';
+import { ChatNode } from '../components/nodes/chat-node';
 import { DocumentNode } from '../components/nodes/document-node';
 import { DeleteMessageNode } from '../components/nodes/delete-message-node';
 import { EditMessageNode } from '../components/nodes/edit-message-node';
@@ -59,6 +60,7 @@ const NODE_KIND_LABELS: Record<NodeKind, string> = {
     document: 'Документ',
     delete_message: 'Сообщение',
     edit_message: 'Сообщение',
+    chat: 'Чат',
     status_set: 'Статус',
     status_get: 'Статус',
     webhook: 'Вебхук',
@@ -103,6 +105,10 @@ const getNodeTitle = (node: Node<NodeData>) => {
             const text = (node.data.editMessageText ?? '').trim();
             return text ? `Изменить: ${text}` : 'Изменить сообщение';
         }
+        case 'chat': {
+            const title = (node.data.chatTitle ?? '').trim();
+            return title ? `Чат: ${title}` : 'Выбрать чат';
+        }
         case 'status_set': {
             const value = (node.data.statusValue ?? '').trim();
             return value ? `Статус: ${value}` : 'Установить статус';
@@ -132,6 +138,21 @@ const getClientPosition = (event: MouseEvent | TouchEvent) => {
     }
     const mouseEvent = event as MouseEvent;
     return { x: mouseEvent.clientX, y: mouseEvent.clientY };
+};
+
+const formatChatLabel = (user: {
+    id: number;
+    username?: string | null;
+    first_name?: string | null;
+    last_name?: string | null;
+}) => {
+    const nameParts = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
+    const username = user.username ? `@${user.username}` : '';
+    const primary = nameParts || username || `ID ${user.id}`;
+    const suffix = [username && username !== primary ? username : '', `ID ${user.id}`]
+        .filter(Boolean)
+        .join(' · ');
+    return suffix && primary !== suffix ? `${primary} (${suffix})` : primary;
 };
 
 const buildEditorValues = (node: Node<NodeData>) => {
@@ -167,6 +188,7 @@ const buildEditorValues = (node: Node<NodeData>) => {
         documentFiles: [] as File[],
         statusValue: node.data.statusValue ?? '',
         editMessageText: node.data.editMessageText ?? '',
+        chatId: node.data.chatId !== undefined ? String(node.data.chatId) : '',
         conditionText: node.data.conditionText ?? '',
         conditionType,
         conditionLengthOp: node.data.conditionLengthOp ?? '',
@@ -185,6 +207,7 @@ export default function Welcome() {
     const [isHydrating, setIsHydrating] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [editorNodeId, setEditorNodeId] = useState<string | null>(null);
+    const [chatOptions, setChatOptions] = useState<{ id: number; label: string }[]>([]);
     const [editorValues, setEditorValues] = useState({
         commandText: '',
         messageText: '',
@@ -199,6 +222,7 @@ export default function Welcome() {
         documentFiles: [] as File[],
         statusValue: '',
         editMessageText: '',
+        chatId: '',
         conditionText: '',
         conditionType: '',
         conditionLengthOp: '',
@@ -222,6 +246,7 @@ export default function Welcome() {
             timer: TimerNode,
             delete_message: DeleteMessageNode,
             edit_message: EditMessageNode,
+            chat: ChatNode,
             status_set: StatusSetNode,
             status_get: StatusGetNode,
             video: VideoNode,
@@ -394,6 +419,15 @@ export default function Welcome() {
             type: 'edit_message',
             position: { x: 520, y: 240 },
             data: { label: 'Изменить сообщение', kind: 'edit_message', editMessageText: '' },
+        });
+    }, [addNodeAndEdit, generateId]);
+
+    const handleAddChatNode = useCallback(() => {
+        addNodeAndEdit({
+            id: generateId('chat'),
+            type: 'chat',
+            position: { x: 520, y: 240 },
+            data: { label: 'Чат', kind: 'chat', chatId: undefined, chatTitle: '' },
         });
     }, [addNodeAndEdit, generateId]);
 
@@ -650,6 +684,15 @@ export default function Welcome() {
                 };
             }
 
+            if (templateKey === 'chat') {
+                newNode = {
+                    id: generateId('chat'),
+                    type: 'chat',
+                    position,
+                    data: { label: 'Чат', kind: 'chat', chatId: undefined, chatTitle: '' },
+                };
+            }
+
             if (templateKey === 'status_set') {
                 newNode = {
                     id: generateId('status_set'),
@@ -816,6 +859,14 @@ export default function Welcome() {
                     if (kind === 'edit_message') {
                         return { ...node, data: { ...node.data, editMessageText: editorValues.editMessageText } };
                     }
+                    if (kind === 'chat') {
+                        const parsedId = editorValues.chatId ? Number(editorValues.chatId) : undefined;
+                        const chatId = Number.isFinite(parsedId) ? parsedId : undefined;
+                        const chatTitle =
+                            chatOptions.find((option) => option.id === chatId)?.label ??
+                            (chatId ? `ID ${chatId}` : '');
+                        return { ...node, data: { ...node.data, chatId, chatTitle } };
+                    }
                     if (kind === 'status_set') {
                         return { ...node, data: { ...node.data, statusValue: editorValues.statusValue.trim() } };
                     }
@@ -926,7 +977,7 @@ export default function Welcome() {
         };
 
         save().catch(() => closeEditor());
-    }, [closeEditor, editorNodeId, editorValues, nodes, setNodes]);
+    }, [chatOptions, closeEditor, editorNodeId, editorValues, nodes, setNodes]);
 
     const handleEditNode = useCallback(
         (nodeId: string) => {
@@ -1077,7 +1128,7 @@ export default function Welcome() {
                     ) {
                         return true;
                     }
-                    if (target.data.kind === 'timer' || target.data.kind === 'condition') {
+                    if (target.data.kind === 'timer' || target.data.kind === 'condition' || target.data.kind === 'chat') {
                         stack.push(target.id);
                     }
                 }
@@ -1248,6 +1299,7 @@ export default function Welcome() {
                     node.data.kind === 'timer' ||
                     node.data.kind === 'delete_message' ||
                     node.data.kind === 'edit_message' ||
+                    node.data.kind === 'chat' ||
                     node.data.kind === 'status_set' ||
                     node.data.kind === 'status_get' ||
                     node.data.kind === 'webhook' ||
@@ -1264,6 +1316,33 @@ export default function Welcome() {
     }, [edges, setNodes]);
 
     const editorNode = editorNodeId ? nodes.find((node) => node.id === editorNodeId) ?? null : null;
+
+    useEffect(() => {
+        if (!bot || !editorNode || editorNode.data.kind !== 'chat') {
+            return;
+        }
+        let isMounted = true;
+        fetch(`${API_BASE}/bots/${bot.id}/users`)
+            .then((response) => (response.ok ? response.json() : Promise.reject()))
+            .then((payload: Array<{ id: number; username?: string | null; first_name?: string | null; last_name?: string | null }>) => {
+                if (!isMounted) {
+                    return;
+                }
+                const options = payload.map((user) => ({
+                    id: user.id,
+                    label: formatChatLabel(user),
+                }));
+                setChatOptions(options);
+            })
+            .catch(() => {
+                if (isMounted) {
+                    setChatOptions([]);
+                }
+            });
+        return () => {
+            isMounted = false;
+        };
+    }, [bot, editorNode]);
     const linkCandidates = useMemo(() => {
         if (!menu || menu.kind !== 'add-edge') {
             return [];
@@ -1282,6 +1361,7 @@ export default function Welcome() {
                         node.data.kind === 'timer' ||
                         node.data.kind === 'delete_message' ||
                         node.data.kind === 'edit_message' ||
+                        node.data.kind === 'chat' ||
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'image' ||
@@ -1300,6 +1380,7 @@ export default function Welcome() {
                         node.data.kind === 'document' ||
                         node.data.kind === 'delete_message' ||
                         node.data.kind === 'edit_message' ||
+                        node.data.kind === 'chat' ||
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'timer'
@@ -1315,6 +1396,7 @@ export default function Welcome() {
                         node.data.kind === 'document' ||
                         node.data.kind === 'delete_message' ||
                         node.data.kind === 'edit_message' ||
+                        node.data.kind === 'chat' ||
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'timer'
@@ -1326,6 +1408,7 @@ export default function Welcome() {
                         node.data.kind === 'condition' ||
                         node.data.kind === 'delete_message' ||
                         node.data.kind === 'edit_message' ||
+                        node.data.kind === 'chat' ||
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'message' ||
@@ -1346,6 +1429,7 @@ export default function Welcome() {
                         node.data.kind === 'document' ||
                         node.data.kind === 'delete_message' ||
                         node.data.kind === 'edit_message' ||
+                        node.data.kind === 'chat' ||
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'timer'
@@ -1357,6 +1441,7 @@ export default function Welcome() {
                         node.data.kind === 'condition' ||
                         node.data.kind === 'delete_message' ||
                         node.data.kind === 'edit_message' ||
+                        node.data.kind === 'chat' ||
                         node.data.kind === 'message' ||
                         node.data.kind === 'image' ||
                         node.data.kind === 'video' ||
@@ -1385,11 +1470,12 @@ export default function Welcome() {
                         node.data.kind === 'document' ||
                         node.data.kind === 'delete_message' ||
                         node.data.kind === 'edit_message' ||
+                        node.data.kind === 'chat' ||
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get'
                 );
             }
-            if (sourceKind === 'delete_message' || sourceKind === 'edit_message') {
+            if (sourceKind === 'delete_message') {
                 candidates = candidates.filter(
                     (node) =>
                         node.data.kind === 'condition' ||
@@ -1398,6 +1484,38 @@ export default function Welcome() {
                         node.data.kind === 'video' ||
                         node.data.kind === 'audio' ||
                         node.data.kind === 'document' ||
+                        node.data.kind === 'timer'
+                );
+            }
+            if (sourceKind === 'edit_message') {
+                candidates = candidates.filter(
+                    (node) =>
+                        node.data.kind === 'message_button' ||
+                        node.data.kind === 'reply_button' ||
+                        node.data.kind === 'button_row' ||
+                        node.data.kind === 'reply_clear' ||
+                        node.data.kind === 'timer' ||
+                        node.data.kind === 'delete_message' ||
+                        node.data.kind === 'chat' ||
+                        node.data.kind === 'status_set' ||
+                        node.data.kind === 'status_get' ||
+                        node.data.kind === 'image' ||
+                        node.data.kind === 'video' ||
+                        node.data.kind === 'audio' ||
+                        node.data.kind === 'document'
+                );
+            }
+            if (sourceKind === 'chat') {
+                candidates = candidates.filter(
+                    (node) =>
+                        node.data.kind === 'condition' ||
+                        node.data.kind === 'message' ||
+                        node.data.kind === 'image' ||
+                        node.data.kind === 'video' ||
+                        node.data.kind === 'audio' ||
+                        node.data.kind === 'document' ||
+                        node.data.kind === 'delete_message' ||
+                        node.data.kind === 'edit_message' ||
                         node.data.kind === 'timer'
                 );
             }
@@ -1430,6 +1548,7 @@ export default function Welcome() {
             { key: 'timer', label: 'Таймер', description: 'Задержка перед сообщением' },
             { key: 'delete_message', label: 'Удалить сообщение', description: 'Удалить текущее сообщение' },
             { key: 'edit_message', label: 'Изменить сообщение', description: 'Заменить текст сообщения' },
+            { key: 'chat', label: 'Чат', description: 'Отправить другому пользователю' },
             { key: 'status_set', label: 'Статус', description: 'Установить статус пользователя' },
             { key: 'status_get', label: 'Статус', description: 'Получить статус пользователя' },
             { key: 'image', label: 'Изображения', description: 'Один или больше файлов' },
@@ -1456,6 +1575,7 @@ export default function Welcome() {
                     item.key === 'timer' ||
                     item.key === 'delete_message' ||
                     item.key === 'edit_message' ||
+                    item.key === 'chat' ||
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
                     item.key === 'image' ||
@@ -1474,6 +1594,7 @@ export default function Welcome() {
                     item.key === 'document' ||
                     item.key === 'delete_message' ||
                     item.key === 'edit_message' ||
+                    item.key === 'chat' ||
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
                     item.key === 'timer'
@@ -1485,6 +1606,7 @@ export default function Welcome() {
                     item.key === 'condition' ||
                     item.key === 'delete_message' ||
                     item.key === 'edit_message' ||
+                    item.key === 'chat' ||
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
                     item.key === 'message' ||
@@ -1505,6 +1627,7 @@ export default function Welcome() {
                     item.key === 'document' ||
                     item.key === 'delete_message' ||
                     item.key === 'edit_message' ||
+                    item.key === 'chat' ||
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
                     item.key === 'timer'
@@ -1520,6 +1643,7 @@ export default function Welcome() {
                     item.key === 'document' ||
                     item.key === 'delete_message' ||
                     item.key === 'edit_message' ||
+                    item.key === 'chat' ||
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
                     item.key === 'timer'
@@ -1531,6 +1655,7 @@ export default function Welcome() {
                     item.key === 'condition' ||
                     item.key === 'delete_message' ||
                     item.key === 'edit_message' ||
+                    item.key === 'chat' ||
                     item.key === 'message' ||
                     item.key === 'image' ||
                     item.key === 'video' ||
@@ -1559,11 +1684,12 @@ export default function Welcome() {
                     item.key === 'document' ||
                     item.key === 'delete_message' ||
                     item.key === 'edit_message' ||
+                    item.key === 'chat' ||
                     item.key === 'status_set' ||
                     item.key === 'status_get'
             );
         }
-        if (sourceKind === 'delete_message' || sourceKind === 'edit_message') {
+        if (sourceKind === 'delete_message') {
             templates = createTemplates.filter(
                 (item) =>
                     item.key === 'condition' ||
@@ -1572,6 +1698,38 @@ export default function Welcome() {
                     item.key === 'video' ||
                     item.key === 'audio' ||
                     item.key === 'document' ||
+                    item.key === 'timer'
+            );
+        }
+        if (sourceKind === 'edit_message') {
+            templates = createTemplates.filter(
+                (item) =>
+                    item.key === 'message_button' ||
+                    item.key === 'reply_button' ||
+                    item.key === 'button_row' ||
+                    item.key === 'reply_clear' ||
+                    item.key === 'timer' ||
+                    item.key === 'delete_message' ||
+                    item.key === 'chat' ||
+                    item.key === 'status_set' ||
+                    item.key === 'status_get' ||
+                    item.key === 'image' ||
+                    item.key === 'video' ||
+                    item.key === 'audio' ||
+                    item.key === 'document'
+            );
+        }
+        if (sourceKind === 'chat') {
+            templates = createTemplates.filter(
+                (item) =>
+                    item.key === 'condition' ||
+                    item.key === 'message' ||
+                    item.key === 'image' ||
+                    item.key === 'video' ||
+                    item.key === 'audio' ||
+                    item.key === 'document' ||
+                    item.key === 'delete_message' ||
+                    item.key === 'edit_message' ||
                     item.key === 'timer'
             );
         }
@@ -1598,6 +1756,7 @@ export default function Welcome() {
             { key: 'timer', label: 'Таймер', description: 'Задержка перед сообщением', action: handleAddTimerNode },
             { key: 'delete_message', label: 'Удалить сообщение', description: 'Удалить текущее сообщение', action: handleAddDeleteMessageNode },
             { key: 'edit_message', label: 'Изменить сообщение', description: 'Заменить текст сообщения', action: handleAddEditMessageNode },
+            { key: 'chat', label: 'Чат', description: 'Отправить другому пользователю', action: handleAddChatNode },
             { key: 'status_set', label: 'Статус', description: 'Установить статус пользователя', action: handleAddStatusSetNode },
             { key: 'status_get', label: 'Статус', description: 'Получить статус пользователя', action: handleAddStatusGetNode },
             { key: 'image', label: 'Изображения', description: 'Один или больше файлов', action: handleAddImageNode },
@@ -1619,6 +1778,7 @@ export default function Welcome() {
             handleAddTimerNode,
             handleAddDeleteMessageNode,
             handleAddEditMessageNode,
+            handleAddChatNode,
             handleAddStatusSetNode,
             handleAddStatusGetNode,
             handleAddImageNode,
@@ -1712,6 +1872,7 @@ export default function Welcome() {
                     <NodeEditorPanel
                         node={editorNode}
                         values={editorValues}
+                        chatOptions={chatOptions}
                         onChange={setEditorValues}
                         onSave={handleSaveEditor}
                         onClose={closeEditor}
