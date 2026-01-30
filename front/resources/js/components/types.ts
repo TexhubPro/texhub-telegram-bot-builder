@@ -9,6 +9,8 @@ export type NodeKind =
     | 'video'
     | 'audio'
     | 'document'
+    | 'delete_message'
+    | 'edit_message'
     | 'status_set'
     | 'status_get'
     | 'webhook'
@@ -31,6 +33,7 @@ export type NodeData = {
     videoUrls?: string[];
     audioUrls?: string[];
     documentUrls?: string[];
+    editMessageText?: string;
     statusValue?: string;
     timerSeconds?: number;
     conditionText?: string;

@@ -404,11 +404,13 @@ def collect_content_targets_with_delay(
             if not target_node:
                 continue
             kind = target_node.get("data", {}).get("kind")
-            if kind in ("message", "image", "video", "audio", "document"):
+            if kind in ("message", "image", "video", "audio", "document", "delete_message", "edit_message"):
                 target_id = target_node.get("id") or ""
                 if target_id and target_id not in seen_targets:
                     seen_targets.add(target_id)
                     results.append((target_node, delay))
+                if kind in ("delete_message", "edit_message"):
+                    queue.append((target_node.get("id") or "", delay))
             elif kind == "timer":
                 next_delay = delay + parse_timer_seconds(target_node)
                 queue.append((target_node.get("id") or "", next_delay))
@@ -691,6 +693,24 @@ async def send_documents(message: Message, urls: List[str], caption: str = "", r
 async def send_content_node(flow: Flow, message: Message, target_node: dict) -> None:
     payload = target_node.get("data", {})
     kind = payload.get("kind")
+    if kind == "delete_message":
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        return
+    if kind == "edit_message":
+        text = (payload.get("editMessageText") or "").strip()
+        if not text:
+            return
+        try:
+            if message.photo or message.video or message.document or message.audio:
+                await message.edit_caption(text, reply_markup=message.reply_markup)
+            else:
+                await message.edit_text(text, reply_markup=message.reply_markup)
+        except Exception:
+            pass
+        return
     if kind == "image":
         urls = payload.get("imageUrls") or []
         reply_markup = build_reply_markup(flow, target_node.get("id") or "")

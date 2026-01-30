@@ -23,6 +23,8 @@ import { NodeContextMenu } from '../components/nodes/context-menu';
 import { GraphActionsContext } from '../components/nodes/graph-actions-context';
 import { AudioNode } from '../components/nodes/audio-node';
 import { DocumentNode } from '../components/nodes/document-node';
+import { DeleteMessageNode } from '../components/nodes/delete-message-node';
+import { EditMessageNode } from '../components/nodes/edit-message-node';
 import { ImageNode } from '../components/nodes/image-node';
 import { MessageButtonNode } from '../components/nodes/message-button-node';
 import { MessageNode } from '../components/nodes/message-node';
@@ -55,6 +57,8 @@ const NODE_KIND_LABELS: Record<NodeKind, string> = {
     video: 'Видео',
     audio: 'Аудио',
     document: 'Документ',
+    delete_message: 'Сообщение',
+    edit_message: 'Сообщение',
     status_set: 'Статус',
     status_get: 'Статус',
     webhook: 'Вебхук',
@@ -92,6 +96,12 @@ const getNodeTitle = (node: Node<NodeData>) => {
         case 'document': {
             const count = node.data.documentUrls?.length ?? 0;
             return count ? `Документы (${count})` : 'Документы';
+        }
+        case 'delete_message':
+            return 'Удалить сообщение';
+        case 'edit_message': {
+            const text = (node.data.editMessageText ?? '').trim();
+            return text ? `Изменить: ${text}` : 'Изменить сообщение';
         }
         case 'status_set': {
             const value = (node.data.statusValue ?? '').trim();
@@ -156,6 +166,7 @@ const buildEditorValues = (node: Node<NodeData>) => {
         documentUrls: node.data.documentUrls ?? [],
         documentFiles: [] as File[],
         statusValue: node.data.statusValue ?? '',
+        editMessageText: node.data.editMessageText ?? '',
         conditionText: node.data.conditionText ?? '',
         conditionType,
         conditionLengthOp: node.data.conditionLengthOp ?? '',
@@ -187,6 +198,7 @@ export default function Welcome() {
         documentUrls: [] as string[],
         documentFiles: [] as File[],
         statusValue: '',
+        editMessageText: '',
         conditionText: '',
         conditionType: '',
         conditionLengthOp: '',
@@ -208,6 +220,8 @@ export default function Welcome() {
             reply_button: ReplyButtonNode,
             reply_clear: ReplyClearNode,
             timer: TimerNode,
+            delete_message: DeleteMessageNode,
+            edit_message: EditMessageNode,
             status_set: StatusSetNode,
             status_get: StatusGetNode,
             video: VideoNode,
@@ -362,6 +376,24 @@ export default function Welcome() {
             type: 'timer',
             position: { x: 520, y: 240 },
             data: { label: 'Таймер', kind: 'timer', timerSeconds: 5 },
+        });
+    }, [addNodeAndEdit, generateId]);
+
+    const handleAddDeleteMessageNode = useCallback(() => {
+        addNode({
+            id: generateId('delete_message'),
+            type: 'delete_message',
+            position: { x: 520, y: 240 },
+            data: { label: 'Удалить сообщение', kind: 'delete_message' },
+        });
+    }, [addNode, generateId]);
+
+    const handleAddEditMessageNode = useCallback(() => {
+        addNodeAndEdit({
+            id: generateId('edit_message'),
+            type: 'edit_message',
+            position: { x: 520, y: 240 },
+            data: { label: 'Изменить сообщение', kind: 'edit_message', editMessageText: '' },
         });
     }, [addNodeAndEdit, generateId]);
 
@@ -600,6 +632,24 @@ export default function Welcome() {
                 };
             }
 
+            if (templateKey === 'delete_message') {
+                newNode = {
+                    id: generateId('delete_message'),
+                    type: 'delete_message',
+                    position,
+                    data: { label: 'Удалить сообщение', kind: 'delete_message' },
+                };
+            }
+
+            if (templateKey === 'edit_message') {
+                newNode = {
+                    id: generateId('edit_message'),
+                    type: 'edit_message',
+                    position,
+                    data: { label: 'Изменить сообщение', kind: 'edit_message', editMessageText: '' },
+                };
+            }
+
             if (templateKey === 'status_set') {
                 newNode = {
                     id: generateId('status_set'),
@@ -692,7 +742,8 @@ export default function Welcome() {
             if (
                 newNode.data.kind !== 'button_row' &&
                 newNode.data.kind !== 'reply_clear' &&
-                newNode.data.kind !== 'status_get'
+                newNode.data.kind !== 'status_get' &&
+                newNode.data.kind !== 'delete_message'
             ) {
                 setEditorNodeId(newNode.id);
                 setEditorValues(buildEditorValues(newNode));
@@ -761,6 +812,9 @@ export default function Welcome() {
                         const parsed = Number(editorValues.timerSeconds);
                         const seconds = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
                         return { ...node, data: { ...node.data, timerSeconds: seconds } };
+                    }
+                    if (kind === 'edit_message') {
+                        return { ...node, data: { ...node.data, editMessageText: editorValues.editMessageText } };
                     }
                     if (kind === 'status_set') {
                         return { ...node, data: { ...node.data, statusValue: editorValues.statusValue.trim() } };
@@ -1017,7 +1071,9 @@ export default function Welcome() {
                         target.data.kind === 'image' ||
                         target.data.kind === 'video' ||
                         target.data.kind === 'audio' ||
-                        target.data.kind === 'document'
+                        target.data.kind === 'document' ||
+                        target.data.kind === 'delete_message' ||
+                        target.data.kind === 'edit_message'
                     ) {
                         return true;
                     }
@@ -1190,6 +1246,8 @@ export default function Welcome() {
                     node.data.kind === 'document' ||
                     node.data.kind === 'button_row' ||
                     node.data.kind === 'timer' ||
+                    node.data.kind === 'delete_message' ||
+                    node.data.kind === 'edit_message' ||
                     node.data.kind === 'status_set' ||
                     node.data.kind === 'status_get' ||
                     node.data.kind === 'webhook' ||
@@ -1222,6 +1280,8 @@ export default function Welcome() {
                         node.data.kind === 'button_row' ||
                         node.data.kind === 'reply_clear' ||
                         node.data.kind === 'timer' ||
+                        node.data.kind === 'delete_message' ||
+                        node.data.kind === 'edit_message' ||
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'image' ||
@@ -1238,6 +1298,8 @@ export default function Welcome() {
                         node.data.kind === 'video' ||
                         node.data.kind === 'audio' ||
                         node.data.kind === 'document' ||
+                        node.data.kind === 'delete_message' ||
+                        node.data.kind === 'edit_message' ||
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'timer'
@@ -1251,6 +1313,8 @@ export default function Welcome() {
                         node.data.kind === 'video' ||
                         node.data.kind === 'audio' ||
                         node.data.kind === 'document' ||
+                        node.data.kind === 'delete_message' ||
+                        node.data.kind === 'edit_message' ||
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'timer'
@@ -1260,6 +1324,8 @@ export default function Welcome() {
                 candidates = candidates.filter(
                     (node) =>
                         node.data.kind === 'condition' ||
+                        node.data.kind === 'delete_message' ||
+                        node.data.kind === 'edit_message' ||
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'message' ||
@@ -1278,6 +1344,8 @@ export default function Welcome() {
                         node.data.kind === 'video' ||
                         node.data.kind === 'audio' ||
                         node.data.kind === 'document' ||
+                        node.data.kind === 'delete_message' ||
+                        node.data.kind === 'edit_message' ||
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'timer'
@@ -1287,6 +1355,8 @@ export default function Welcome() {
                 candidates = candidates.filter(
                     (node) =>
                         node.data.kind === 'condition' ||
+                        node.data.kind === 'delete_message' ||
+                        node.data.kind === 'edit_message' ||
                         node.data.kind === 'message' ||
                         node.data.kind === 'image' ||
                         node.data.kind === 'video' ||
@@ -1313,8 +1383,22 @@ export default function Welcome() {
                         node.data.kind === 'video' ||
                         node.data.kind === 'audio' ||
                         node.data.kind === 'document' ||
+                        node.data.kind === 'delete_message' ||
+                        node.data.kind === 'edit_message' ||
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get'
+                );
+            }
+            if (sourceKind === 'delete_message' || sourceKind === 'edit_message') {
+                candidates = candidates.filter(
+                    (node) =>
+                        node.data.kind === 'condition' ||
+                        node.data.kind === 'message' ||
+                        node.data.kind === 'image' ||
+                        node.data.kind === 'video' ||
+                        node.data.kind === 'audio' ||
+                        node.data.kind === 'document' ||
+                        node.data.kind === 'timer'
                 );
             }
             if (sourceKind === 'button_row') {
@@ -1344,6 +1428,8 @@ export default function Welcome() {
             { key: 'reply_button', label: 'Reply Button', description: 'Ответная кнопка' },
             { key: 'reply_clear', label: 'Clear Reply', description: 'Очистить reply-кнопки' },
             { key: 'timer', label: 'Таймер', description: 'Задержка перед сообщением' },
+            { key: 'delete_message', label: 'Удалить сообщение', description: 'Удалить текущее сообщение' },
+            { key: 'edit_message', label: 'Изменить сообщение', description: 'Заменить текст сообщения' },
             { key: 'status_set', label: 'Статус', description: 'Установить статус пользователя' },
             { key: 'status_get', label: 'Статус', description: 'Получить статус пользователя' },
             { key: 'image', label: 'Изображения', description: 'Один или больше файлов' },
@@ -1368,6 +1454,8 @@ export default function Welcome() {
                     item.key === 'button_row' ||
                     item.key === 'reply_clear' ||
                     item.key === 'timer' ||
+                    item.key === 'delete_message' ||
+                    item.key === 'edit_message' ||
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
                     item.key === 'image' ||
@@ -1384,6 +1472,8 @@ export default function Welcome() {
                     item.key === 'video' ||
                     item.key === 'audio' ||
                     item.key === 'document' ||
+                    item.key === 'delete_message' ||
+                    item.key === 'edit_message' ||
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
                     item.key === 'timer'
@@ -1393,6 +1483,8 @@ export default function Welcome() {
             templates = createTemplates.filter(
                 (item) =>
                     item.key === 'condition' ||
+                    item.key === 'delete_message' ||
+                    item.key === 'edit_message' ||
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
                     item.key === 'message' ||
@@ -1411,6 +1503,8 @@ export default function Welcome() {
                     item.key === 'video' ||
                     item.key === 'audio' ||
                     item.key === 'document' ||
+                    item.key === 'delete_message' ||
+                    item.key === 'edit_message' ||
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
                     item.key === 'timer'
@@ -1424,6 +1518,8 @@ export default function Welcome() {
                     item.key === 'video' ||
                     item.key === 'audio' ||
                     item.key === 'document' ||
+                    item.key === 'delete_message' ||
+                    item.key === 'edit_message' ||
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
                     item.key === 'timer'
@@ -1433,6 +1529,8 @@ export default function Welcome() {
             templates = createTemplates.filter(
                 (item) =>
                     item.key === 'condition' ||
+                    item.key === 'delete_message' ||
+                    item.key === 'edit_message' ||
                     item.key === 'message' ||
                     item.key === 'image' ||
                     item.key === 'video' ||
@@ -1459,8 +1557,22 @@ export default function Welcome() {
                     item.key === 'video' ||
                     item.key === 'audio' ||
                     item.key === 'document' ||
+                    item.key === 'delete_message' ||
+                    item.key === 'edit_message' ||
                     item.key === 'status_set' ||
                     item.key === 'status_get'
+            );
+        }
+        if (sourceKind === 'delete_message' || sourceKind === 'edit_message') {
+            templates = createTemplates.filter(
+                (item) =>
+                    item.key === 'condition' ||
+                    item.key === 'message' ||
+                    item.key === 'image' ||
+                    item.key === 'video' ||
+                    item.key === 'audio' ||
+                    item.key === 'document' ||
+                    item.key === 'timer'
             );
         }
         if (sourceKind === 'button_row') {
@@ -1484,6 +1596,8 @@ export default function Welcome() {
             { key: 'reply_button', label: 'Reply Button', description: 'Ответная кнопка', action: handleAddReplyButtonNode },
             { key: 'reply_clear', label: 'Clear Reply', description: 'Очистить reply-кнопки', action: handleAddReplyClearNode },
             { key: 'timer', label: 'Таймер', description: 'Задержка перед сообщением', action: handleAddTimerNode },
+            { key: 'delete_message', label: 'Удалить сообщение', description: 'Удалить текущее сообщение', action: handleAddDeleteMessageNode },
+            { key: 'edit_message', label: 'Изменить сообщение', description: 'Заменить текст сообщения', action: handleAddEditMessageNode },
             { key: 'status_set', label: 'Статус', description: 'Установить статус пользователя', action: handleAddStatusSetNode },
             { key: 'status_get', label: 'Статус', description: 'Получить статус пользователя', action: handleAddStatusGetNode },
             { key: 'image', label: 'Изображения', description: 'Один или больше файлов', action: handleAddImageNode },
@@ -1503,6 +1617,8 @@ export default function Welcome() {
             handleAddReplyButtonNode,
             handleAddReplyClearNode,
             handleAddTimerNode,
+            handleAddDeleteMessageNode,
+            handleAddEditMessageNode,
             handleAddStatusSetNode,
             handleAddStatusGetNode,
             handleAddImageNode,

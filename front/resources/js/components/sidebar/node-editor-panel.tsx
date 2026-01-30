@@ -21,6 +21,7 @@ type Values = {
     documentUrls: string[];
     documentFiles: File[];
     statusValue: string;
+    editMessageText: string;
     conditionText: string;
     conditionType: string;
     conditionLengthOp: string;
@@ -53,6 +54,10 @@ const getTitle = (kind?: NodeKind) => {
             return 'Аудио';
         case 'document':
             return 'Документ';
+        case 'delete_message':
+            return 'Удалить сообщение';
+        case 'edit_message':
+            return 'Изменить сообщение';
         case 'status_set':
             return 'Статус';
         case 'status_get':
@@ -131,6 +136,14 @@ export function NodeEditorPanel({ node, values, onChange, onSave, onClose }: Pro
                                     type="number"
                                     min="0"
                                     step="1"
+                                />
+                            ) : null}
+                            {kind === 'edit_message' ? (
+                                <FieldTextarea
+                                    label="Новый текст сообщения"
+                                    value={values.editMessageText}
+                                    onChange={(value) => onChange({ ...values, editMessageText: value })}
+                                    placeholder="Новый текст"
                                 />
                             ) : null}
                             {kind === 'status_set' ? (
