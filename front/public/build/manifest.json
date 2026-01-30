@@ -1,10 +1,6 @@
 {
-  "_welcome-B5DZHykP.css": {
-    "file": "assets/welcome-B5DZHykP.css",
-    "src": "_welcome-B5DZHykP.css"
-  },
-  "_welcome-C5FqqPjK.js": {
-    "file": "assets/welcome-C5FqqPjK.js",
+  "_welcome-B2tkCiK-.js": {
+    "file": "assets/welcome-B2tkCiK-.js",
     "name": "welcome",
     "isDynamicEntry": true,
     "imports": [
@@ -19,13 +15,17 @@
       "assets/welcome-B5DZHykP.css"
     ]
   },
+  "_welcome-B5DZHykP.css": {
+    "file": "assets/welcome-B5DZHykP.css",
+    "src": "_welcome-B5DZHykP.css"
+  },
   "node_modules/@heroui/dom-animation/dist/index.mjs": {
-    "file": "assets/index-CVlQFCYs.js",
+    "file": "assets/index-Dq3hEXT_.js",
     "name": "index",
     "src": "node_modules/@heroui/dom-animation/dist/index.mjs",
     "isDynamicEntry": true,
     "imports": [
-      "_welcome-C5FqqPjK.js",
+      "_welcome-B2tkCiK-.js",
       "resources/js/app.tsx"
     ],
     "css": [
@@ -42,12 +42,12 @@
     ]
   },
   "resources/js/app.tsx": {
-    "file": "assets/app-BVvt4vmK.js",
+    "file": "assets/app-DuAsovck.js",
     "name": "app",
     "src": "resources/js/app.tsx",
     "isEntry": true,
     "dynamicImports": [
-      "_welcome-C5FqqPjK.js"
+      "_welcome-B2tkCiK-.js"
     ],
     "css": [
       "assets/app-DpX66nCs.css"

@@ -5,7 +5,7 @@ import { DownloadIcon, UploadIcon } from '../ui/icons';
 import { GraphActionsContext } from './graph-actions-context';
 import type { NodeData } from '../types';
 
-const API_BASE = 'https://toocars.tj';
+const API_BASE = (import.meta.env.VITE_API_BASE ?? 'https://toocars.tj').replace(/\/+$/, '');
 
 export function ExcelFileNode({ data, id }: NodeProps<NodeData>) {
     const name = (data.fileName || '').trim();

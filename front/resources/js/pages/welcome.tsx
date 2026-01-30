@@ -50,7 +50,7 @@ import { Sidebar } from '../components/sidebar/sidebar';
 import { DeletableEdge } from '../components/edges/deletable-edge';
 import type { Bot, ContextMenu, NodeData, NodeKind } from '../components/types';
 
-const API_BASE = 'https://toocars.tj';
+const API_BASE = (import.meta.env.VITE_API_BASE ?? 'https://toocars.tj').replace(/\/+$/, '');
 
 const initialNodes: Node<NodeData>[] = [];
 const initialEdges: Edge[] = [];
