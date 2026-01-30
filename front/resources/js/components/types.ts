@@ -14,6 +14,9 @@ export type NodeKind =
     | 'chat'
     | 'status_set'
     | 'status_get'
+    | 'task'
+    | 'broadcast'
+    | 'subscription'
     | 'webhook'
     | 'condition'
     | 'button_row'
@@ -43,7 +46,13 @@ export type NodeData = {
     editMessageText?: string;
     chatId?: number;
     chatTitle?: string;
+    subscriptionChatId?: number;
+    subscriptionChatTitle?: string;
     statusValue?: string;
+    taskScheduleType?: string;
+    taskIntervalMinutes?: number;
+    taskDailyTime?: string;
+    taskRunAt?: string;
     timerSeconds?: number;
     conditionText?: string;
     conditionType?: string;

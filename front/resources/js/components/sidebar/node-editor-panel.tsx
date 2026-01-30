@@ -29,6 +29,11 @@ type Values = {
     statusValue: string;
     editMessageText: string;
     chatId: string;
+    subscriptionChatId: string;
+    taskScheduleType: string;
+    taskIntervalMinutes: string;
+    taskDailyTime: string;
+    taskRunAt: string;
     conditionText: string;
     conditionType: string;
     conditionLengthOp: string;
@@ -39,6 +44,7 @@ type Props = {
     node: Node<NodeData> | null;
     values: Values;
     chatOptions: { id: number; label: string }[];
+    subscriptionOptions: { id: number; label: string }[];
     onChange: (values: Values) => void;
     onSave: () => void;
     onClose: () => void;
@@ -72,6 +78,12 @@ const getTitle = (kind?: NodeKind) => {
             return 'Статус';
         case 'status_get':
             return 'Статус';
+        case 'subscription':
+            return 'Подписка';
+        case 'task':
+            return 'Задача';
+        case 'broadcast':
+            return 'Рассылка';
         case 'condition':
             return 'Проверка';
         case 'webhook':
@@ -83,7 +95,7 @@ const getTitle = (kind?: NodeKind) => {
     }
 };
 
-export function NodeEditorPanel({ node, values, chatOptions, onChange, onSave, onClose }: Props) {
+export function NodeEditorPanel({ node, values, chatOptions, subscriptionOptions, onChange, onSave, onClose }: Props) {
     if (!node) {
         return (
             <aside className="w-80 border-l border-slate-200/70 bg-white/80 p-4 backdrop-blur">
@@ -251,6 +263,25 @@ export function NodeEditorPanel({ node, values, chatOptions, onChange, onSave, o
                                     </select>
                                 </div>
                             ) : null}
+                            {kind === 'subscription' ? (
+                                <div className="flex flex-col gap-2">
+                                    <label className="block text-xs font-semibold text-slate-600">Канал или группа</label>
+                                    <select
+                                        value={values.subscriptionChatId}
+                                        onChange={(event) =>
+                                            onChange({ ...values, subscriptionChatId: event.target.value })
+                                        }
+                                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                                    >
+                                        <option value="">Выбери канал/группу</option>
+                                        {subscriptionOptions.map((option) => (
+                                            <option key={option.id} value={option.id}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            ) : null}
                             {kind === 'status_set' ? (
                                 <FieldInput
                                     label="Статус"
@@ -258,6 +289,65 @@ export function NodeEditorPanel({ node, values, chatOptions, onChange, onSave, o
                                     onChange={(value) => onChange({ ...values, statusValue: value })}
                                     placeholder="send_phone"
                                 />
+                            ) : null}
+                            {kind === 'task' ? (
+                                <div className="flex flex-col gap-3">
+                                    <div className="flex flex-col gap-2">
+                                        <label className="block text-xs font-semibold text-slate-600">Тип задачи</label>
+                                        <select
+                                            value={values.taskScheduleType}
+                                            onChange={(event) =>
+                                                onChange({
+                                                    ...values,
+                                                    taskScheduleType: event.target.value,
+                                                })
+                                            }
+                                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                                        >
+                                            <option value="interval">Интервал</option>
+                                            <option value="daily">Каждый день</option>
+                                            <option value="datetime">Дата и время</option>
+                                        </select>
+                                    </div>
+                                    {values.taskScheduleType === 'interval' ? (
+                                        <div className="flex flex-col gap-2">
+                                            <label className="block text-xs font-semibold text-slate-600">Интервал</label>
+                                            <select
+                                                value={values.taskIntervalMinutes}
+                                                onChange={(event) =>
+                                                    onChange({ ...values, taskIntervalMinutes: event.target.value })
+                                                }
+                                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                                            >
+                                                <option value="1">Каждую минуту</option>
+                                                <option value="5">Каждые 5 минут</option>
+                                                <option value="10">Каждые 10 минут</option>
+                                                <option value="20">Каждые 20 минут</option>
+                                                <option value="30">Каждые 30 минут</option>
+                                                <option value="60">Каждый час</option>
+                                                <option value="120">Каждые 2 часа</option>
+                                                <option value="360">Каждые 6 часов</option>
+                                                <option value="1440">Каждый день</option>
+                                            </select>
+                                        </div>
+                                    ) : null}
+                                    {values.taskScheduleType === 'daily' ? (
+                                        <FieldInput
+                                            label="Время"
+                                            value={values.taskDailyTime}
+                                            onChange={(value) => onChange({ ...values, taskDailyTime: value })}
+                                            type="time"
+                                        />
+                                    ) : null}
+                                    {values.taskScheduleType === 'datetime' ? (
+                                        <FieldInput
+                                            label="Дата и время"
+                                            value={values.taskRunAt}
+                                            onChange={(value) => onChange({ ...values, taskRunAt: value })}
+                                            type="datetime-local"
+                                        />
+                                    ) : null}
+                                </div>
                             ) : null}
                             {kind === 'condition' ? (
                                 <div className="flex flex-col gap-3">

@@ -6,6 +6,7 @@ import os
 import re
 import sqlite3
 import uuid
+from datetime import datetime, time as time_value
 from urllib.parse import urlparse
 from typing import Dict, List, Optional, Tuple
 
@@ -107,6 +108,20 @@ def init_db() -> None:
                 status TEXT,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (bot_id, user_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bot_chats (
+                bot_id TEXT NOT NULL,
+                chat_id INTEGER NOT NULL,
+                title TEXT,
+                username TEXT,
+                type TEXT,
+                is_admin INTEGER DEFAULT 0,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (bot_id, chat_id)
             )
             """
         )
@@ -218,6 +233,84 @@ def list_users(bot_id: str) -> List[dict]:
     ]
 
 
+def list_user_entries(bot_id: str) -> List[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT user_id, username, first_name, last_name, status
+            FROM user_status
+            WHERE bot_id = ?
+            ORDER BY updated_at DESC
+            """,
+            (bot_id,),
+        ).fetchall()
+    return [
+        {
+            "id": row["user_id"],
+            "username": row["username"],
+            "first_name": row["first_name"],
+            "last_name": row["last_name"],
+            "status": row["status"] or "",
+        }
+        for row in rows
+    ]
+
+
+def upsert_chat_row(
+    bot_id: str,
+    chat_id: int,
+    title: Optional[str],
+    username: Optional[str],
+    chat_type: Optional[str],
+    is_admin: bool,
+) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO bot_chats (
+                bot_id,
+                chat_id,
+                title,
+                username,
+                type,
+                is_admin,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(bot_id, chat_id) DO UPDATE SET
+                title = excluded.title,
+                username = excluded.username,
+                type = excluded.type,
+                is_admin = excluded.is_admin,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (bot_id, chat_id, title, username, chat_type, 1 if is_admin else 0),
+        )
+        conn.commit()
+
+
+def list_chats(bot_id: str) -> List[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT chat_id, title, username, type
+            FROM bot_chats
+            WHERE bot_id = ? AND is_admin = 1
+            ORDER BY updated_at DESC
+            """,
+            (bot_id,),
+        ).fetchall()
+    return [
+        {
+            "id": row["chat_id"],
+            "title": row["title"],
+            "username": row["username"],
+            "type": row["type"],
+        }
+        for row in rows
+    ]
+
+
 async def fetch_profile_photo_id(telegram_bot: TelegramBot, user_id: int) -> Optional[str]:
     try:
         photos = await telegram_bot.get_user_profile_photos(user_id, limit=1)
@@ -256,6 +349,42 @@ async def ensure_user_row(bot_id: str, user: Optional[object], telegram_bot: Opt
     )
 
 
+async def ensure_chat_row(
+    bot_id: str,
+    chat: Optional[object],
+    telegram_bot: TelegramBot,
+    bot_user_id: int,
+    admin_cache: Dict[int, bool],
+) -> None:
+    if not chat:
+        return
+    chat_type = getattr(chat, "type", None)
+    if chat_type not in ("group", "supergroup", "channel"):
+        return
+    chat_id = getattr(chat, "id", None)
+    if chat_id is None:
+        return
+    is_admin = admin_cache.get(chat_id)
+    if is_admin is None:
+        try:
+            member = await telegram_bot.get_chat_member(chat_id, bot_user_id)
+            status = getattr(member, "status", "") or ""
+            is_admin = status in ("administrator", "creator")
+        except Exception:
+            is_admin = False
+        admin_cache[chat_id] = is_admin
+    if not is_admin:
+        return
+    upsert_chat_row(
+        bot_id,
+        chat_id,
+        getattr(chat, "title", None),
+        getattr(chat, "username", None),
+        chat_type,
+        True,
+    )
+
+
 def get_bot_or_404(bot_id: str) -> Bot:
     with get_connection() as conn:
         row = conn.execute("SELECT * FROM bots WHERE id = ?", (bot_id,)).fetchone()
@@ -291,14 +420,22 @@ def normalize_command(text: str) -> str:
     return value.lower()
 
 
-def render_template(text: str, message: Message, user: Optional[object] = None) -> str:
+def render_template(
+    text: str,
+    message: Message,
+    user: Optional[object] = None,
+    chat_id_override: Optional[int] = None,
+) -> str:
     if not text:
         return ""
     source = user or message.from_user
     first_name = getattr(source, "first_name", "") if source else ""
     last_name = getattr(source, "last_name", "") if source else ""
     username = getattr(source, "username", "") if source else ""
-    chat_id = message.chat.id if message.chat else ""
+    if chat_id_override is not None:
+        chat_id = chat_id_override
+    else:
+        chat_id = message.chat.id if message.chat else ""
     replacements = {
         "{name}": first_name,
         "{first_name}": first_name,
@@ -348,6 +485,29 @@ def parse_chat_id(node: dict) -> Optional[int]:
     except (TypeError, ValueError):
         return None
     return value
+
+
+def parse_subscription_chat_id(node: dict) -> Optional[int]:
+    data = node.get("data", {})
+    raw = data.get("subscriptionChatId")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value
+
+
+async def is_user_subscribed(telegram_bot: TelegramBot, chat_id: int, user_id: int) -> bool:
+    try:
+        member = await telegram_bot.get_chat_member(chat_id, user_id)
+    except Exception:
+        return False
+    status = getattr(member, "status", "") or ""
+    if status in ("creator", "administrator", "member"):
+        return True
+    if status == "restricted":
+        return bool(getattr(member, "is_member", False))
+    return False
 
 
 def match_condition(message: Message, node: dict, bot_id: Optional[str] = None, user_id: Optional[int] = None) -> bool:
@@ -418,7 +578,7 @@ def match_condition(message: Message, node: dict, bot_id: Optional[str] = None, 
     return all(checks)
 
 
-def collect_content_targets_with_delay(
+async def collect_content_targets_with_delay(
     flow: Flow,
     source_id: str,
     message: Message | None = None,
@@ -447,12 +607,18 @@ def collect_content_targets_with_delay(
         condition_pass = None
         if current_kind == "condition" and message:
             condition_pass = match_condition(message, current_node, bot_id, effective_user_id)
+        subscription_pass = None
+        if current_kind == "subscription" and message and effective_user_id is not None:
+            chat_id = parse_subscription_chat_id(current_node)
+            if chat_id is not None:
+                subscription_pass = await is_user_subscribed(message.bot, chat_id, effective_user_id)
         for edge in flow.edges:
             if edge.get("source") != current_id:
                 continue
-            if current_kind == "condition":
+            if current_kind in ("condition", "subscription"):
                 handle = edge.get("sourceHandle") or "true"
-                expected = "true" if condition_pass else "false"
+                result = condition_pass if current_kind == "condition" else subscription_pass
+                expected = "true" if result else "false"
                 if handle != expected:
                     continue
             target_node = nodes_by_id.get(edge.get("target"))
@@ -468,7 +634,7 @@ def collect_content_targets_with_delay(
             elif kind == "timer":
                 next_delay = delay + parse_timer_seconds(target_node)
                 queue.append((target_node.get("id") or "", next_delay, target_chat_id))
-            elif kind == "condition":
+            elif kind == "condition" or kind == "subscription":
                 queue.append((target_node.get("id") or "", delay, target_chat_id))
             elif kind == "status_set":
                 if bot_id and effective_user_id is not None:
@@ -485,6 +651,379 @@ def collect_content_targets_with_delay(
     return results
 
 
+def parse_task_interval_minutes(node: dict) -> int:
+    data = node.get("data", {})
+    raw = data.get("taskIntervalMinutes")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 60
+    if value <= 0:
+        return 60
+    return value
+
+
+def parse_task_daily_time(node: dict) -> Optional[time_value]:
+    data = node.get("data", {})
+    raw = (data.get("taskDailyTime") or "").strip()
+    if not raw:
+        return None
+    try:
+        parts = raw.split(":")
+        hour = int(parts[0])
+        minute = int(parts[1]) if len(parts) > 1 else 0
+        return time_value(hour=hour, minute=minute)
+    except (ValueError, IndexError):
+        return None
+
+
+def parse_task_run_at(node: dict) -> Optional[datetime]:
+    data = node.get("data", {})
+    raw = (data.get("taskRunAt") or "").strip()
+    if not raw:
+        return None
+    for fmt in ("%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(raw, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def should_run_task(node: dict, now: datetime, last_run: Optional[datetime]) -> bool:
+    schedule_type = (node.get("data", {}).get("taskScheduleType") or "interval").strip()
+    if schedule_type == "daily":
+        daily_time = parse_task_daily_time(node)
+        if daily_time is None:
+            daily_time = time_value(hour=10, minute=0)
+        if now.time() < daily_time:
+            return False
+        if last_run is None:
+            return True
+        return last_run.date() < now.date()
+    if schedule_type == "datetime":
+        run_at = parse_task_run_at(node)
+        if not run_at:
+            return False
+        if last_run is not None:
+            return False
+        return now >= run_at
+    interval_minutes = parse_task_interval_minutes(node)
+    if last_run is None:
+        return True
+    elapsed = (now - last_run).total_seconds()
+    return elapsed >= interval_minutes * 60
+
+
+def match_condition_for_entry(node: dict, entry: dict) -> bool:
+    data = node.get("data", {})
+    condition_type = (data.get("conditionType") or "").strip()
+    condition_text = (data.get("conditionText") or "").strip()
+    if condition_type == "status":
+        if not condition_text:
+            return False
+        status_value = (entry.get("status") or "").strip()
+        return status_value.lower() == condition_text.lower()
+    return False
+
+
+async def collect_scheduled_targets(
+    flow: Flow,
+    source_id: str,
+    bot_id: str,
+    telegram_bot: TelegramBot,
+) -> List[Tuple[dict, float, int, Optional[dict]]]:
+    nodes_by_id = {node.get("id"): node for node in flow.nodes}
+    results: List[Tuple[dict, float, int, Optional[dict]]] = []
+    user_entries = list_user_entries(bot_id)
+    user_by_id = {entry["id"]: entry for entry in user_entries}
+    visited: set[tuple[str, Optional[int], Optional[int]]] = set()
+    queue: List[Tuple[str, float, Optional[int], Optional[dict]]] = [(source_id, 0.0, None, None)]
+    while queue:
+        current_id, delay, target_chat_id, entry = queue.pop(0)
+        entry_id = entry["id"] if entry else None
+        if not current_id or (current_id, target_chat_id, entry_id) in visited:
+            continue
+        visited.add((current_id, target_chat_id, entry_id))
+        current_node = nodes_by_id.get(current_id)
+        current_kind = current_node.get("data", {}).get("kind") if current_node else None
+
+        if current_kind == "broadcast" and current_node:
+            for user_entry in user_entries:
+                for edge in flow.edges:
+                    if edge.get("source") != current_id:
+                        continue
+                    queue.append((edge.get("target") or "", delay, user_entry["id"], user_entry))
+            continue
+
+        if current_kind == "chat" and current_node:
+            override_chat_id = parse_chat_id(current_node)
+            if override_chat_id is not None:
+                target_chat_id = override_chat_id
+                entry = user_by_id.get(override_chat_id, entry)
+        condition_pass = None
+        if current_kind == "condition" and entry:
+            condition_pass = match_condition_for_entry(current_node, entry)
+        subscription_pass = None
+        if current_kind == "subscription" and entry:
+            chat_id = parse_subscription_chat_id(current_node)
+            if chat_id is not None:
+                subscription_pass = await is_user_subscribed(telegram_bot, chat_id, entry["id"])
+
+        for edge in flow.edges:
+            if edge.get("source") != current_id:
+                continue
+            if current_kind in ("condition", "subscription"):
+                handle = edge.get("sourceHandle") or "true"
+                result = condition_pass if current_kind == "condition" else subscription_pass
+                expected = "true" if result else "false"
+                if handle != expected:
+                    continue
+            target_node = nodes_by_id.get(edge.get("target"))
+            if not target_node:
+                continue
+            kind = target_node.get("data", {}).get("kind")
+            if kind in ("message", "image", "video", "audio", "document", "delete_message", "edit_message"):
+                chat_id = target_chat_id or (entry["id"] if entry else None)
+                if chat_id is not None:
+                    results.append((target_node, delay, chat_id, entry))
+            elif kind == "timer":
+                next_delay = delay + parse_timer_seconds(target_node)
+                queue.append((target_node.get("id") or "", next_delay, target_chat_id, entry))
+            elif kind in ("condition", "subscription", "broadcast"):
+                queue.append((target_node.get("id") or "", delay, target_chat_id, entry))
+            elif kind == "status_set":
+                if entry:
+                    set_user_status(bot_id, entry["id"], target_node.get("data", {}).get("statusValue") or "")
+                queue.append((target_node.get("id") or "", delay, target_chat_id, entry))
+            elif kind == "status_get":
+                queue.append((target_node.get("id") or "", delay, target_chat_id, entry))
+            elif kind == "chat":
+                queue.append((target_node.get("id") or "", delay, target_chat_id, entry))
+    return results
+
+
+async def send_images_via_bot(
+    telegram_bot: TelegramBot,
+    chat_id: int,
+    urls: List[str],
+    caption: str = "",
+    reply_markup=None,
+) -> bool:
+    sources = [resolve_upload_source(url) for url in urls]
+    sources = [source for source in sources if source]
+    if not sources:
+        return False
+    if len(sources) == 1:
+        await telegram_bot.send_photo(chat_id, sources[0], caption=caption or None, reply_markup=reply_markup)
+        return True
+    media = []
+    for idx, source in enumerate(sources):
+        if idx == 0 and caption:
+            media.append(InputMediaPhoto(media=source, caption=caption))
+        else:
+            media.append(InputMediaPhoto(media=source))
+    await telegram_bot.send_media_group(chat_id, media)
+    return True
+
+
+async def send_videos_via_bot(
+    telegram_bot: TelegramBot,
+    chat_id: int,
+    urls: List[str],
+    caption: str = "",
+    reply_markup=None,
+) -> bool:
+    sources = [resolve_upload_source(url) for url in urls]
+    sources = [source for source in sources if source]
+    if not sources:
+        return False
+    if len(sources) == 1:
+        await telegram_bot.send_video(chat_id, sources[0], caption=caption or None, reply_markup=reply_markup)
+        return True
+    media = []
+    for idx, source in enumerate(sources):
+        if idx == 0 and caption:
+            media.append(InputMediaVideo(media=source, caption=caption))
+        else:
+            media.append(InputMediaVideo(media=source))
+    await telegram_bot.send_media_group(chat_id, media)
+    return True
+
+
+async def send_audios_via_bot(
+    telegram_bot: TelegramBot,
+    chat_id: int,
+    urls: List[str],
+    caption: str = "",
+    reply_markup=None,
+) -> bool:
+    sources = [resolve_upload_source(url) for url in urls]
+    sources = [source for source in sources if source]
+    if not sources:
+        return False
+    if len(sources) == 1:
+        await telegram_bot.send_audio(chat_id, sources[0], caption=caption or None, reply_markup=reply_markup)
+        return True
+    media = []
+    for idx, source in enumerate(sources):
+        if idx == 0 and caption:
+            media.append(InputMediaAudio(media=source, caption=caption))
+        else:
+            media.append(InputMediaAudio(media=source))
+    await telegram_bot.send_media_group(chat_id, media)
+    return True
+
+
+async def send_documents_via_bot(
+    telegram_bot: TelegramBot,
+    chat_id: int,
+    urls: List[str],
+    caption: str = "",
+    reply_markup=None,
+) -> bool:
+    sources = [resolve_upload_source(url) for url in urls]
+    sources = [source for source in sources if source]
+    if not sources:
+        return False
+    if len(sources) == 1:
+        await telegram_bot.send_document(chat_id, sources[0], caption=caption or None, reply_markup=reply_markup)
+        return True
+    media = []
+    for idx, source in enumerate(sources):
+        if idx == 0 and caption:
+            media.append(InputMediaDocument(media=source, caption=caption))
+        else:
+            media.append(InputMediaDocument(media=source))
+    await telegram_bot.send_media_group(chat_id, media)
+    return True
+
+
+async def send_content_node_to_chat(
+    flow: Flow,
+    telegram_bot: TelegramBot,
+    chat_id: int,
+    target_node: dict,
+    entry: Optional[dict],
+) -> None:
+    payload = target_node.get("data", {})
+    kind = payload.get("kind")
+    if kind == "delete_message":
+        return
+    is_edit = kind == "edit_message"
+    if kind == "message" or is_edit:
+        raw_text = payload.get("editMessageText") if is_edit else payload.get("messageText")
+        fake_message = type("Obj", (), {"chat": type("Obj", (), {"id": chat_id})()})()
+        user_obj = None
+        if entry:
+            user_obj = type(
+                "Obj",
+                (),
+                {
+                    "id": entry.get("id"),
+                    "username": entry.get("username"),
+                    "first_name": entry.get("first_name"),
+                    "last_name": entry.get("last_name"),
+                },
+            )()
+        message_text = render_template((raw_text or "").strip(), fake_message, user_obj, chat_id)
+        image_urls = collect_image_urls(flow, target_node.get("id") or "")
+        video_urls = collect_video_urls(flow, target_node.get("id") or "")
+        audio_urls = collect_audio_urls(flow, target_node.get("id") or "")
+        document_urls = collect_document_urls(flow, target_node.get("id") or "")
+        reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+        caption_used = False
+        reply_used = False
+        if image_urls:
+            caption = message_text if message_text and not caption_used else ""
+            await send_images_via_bot(telegram_bot, chat_id, image_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+            if caption:
+                caption_used = True
+                reply_used = True
+        if video_urls:
+            caption = message_text if message_text and not caption_used else ""
+            await send_videos_via_bot(telegram_bot, chat_id, video_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+            if caption:
+                caption_used = True
+                reply_used = True
+        if audio_urls:
+            caption = message_text if message_text and not caption_used else ""
+            await send_audios_via_bot(telegram_bot, chat_id, audio_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+            if caption:
+                caption_used = True
+                reply_used = True
+        if document_urls:
+            caption = message_text if message_text and not caption_used else ""
+            await send_documents_via_bot(telegram_bot, chat_id, document_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+            if caption:
+                caption_used = True
+                reply_used = True
+        if not (image_urls or video_urls or audio_urls or document_urls):
+            if message_text:
+                await telegram_bot.send_message(chat_id, message_text, reply_markup=reply_markup)
+        return
+    if kind == "image":
+        urls = payload.get("imageUrls") or []
+        reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+        await send_images_via_bot(telegram_bot, chat_id, urls, reply_markup=reply_markup)
+        return
+    if kind == "video":
+        urls = payload.get("videoUrls") or []
+        reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+        await send_videos_via_bot(telegram_bot, chat_id, urls, reply_markup=reply_markup)
+        return
+    if kind == "audio":
+        urls = payload.get("audioUrls") or []
+        reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+        await send_audios_via_bot(telegram_bot, chat_id, urls, reply_markup=reply_markup)
+        return
+    if kind == "document":
+        urls = payload.get("documentUrls") or []
+        reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+        await send_documents_via_bot(telegram_bot, chat_id, urls, reply_markup=reply_markup)
+
+
+async def send_scheduled_targets_with_delay(
+    flow: Flow,
+    telegram_bot: TelegramBot,
+    targets: List[Tuple[dict, float, int, Optional[dict]]],
+) -> None:
+    if not targets:
+        return
+    ordered = sorted(targets, key=lambda item: item[1])
+    elapsed = 0.0
+    for target_node, delay, chat_id, entry in ordered:
+        wait_time = delay - elapsed
+        if wait_time > 0:
+            await asyncio.sleep(wait_time)
+            elapsed = delay
+        await send_content_node_to_chat(flow, telegram_bot, chat_id, target_node, entry)
+
+
+async def task_scheduler_loop(
+    bot: Bot,
+    telegram_bot: TelegramBot,
+    stop_event: asyncio.Event,
+    last_run_by_task: Dict[str, datetime],
+) -> None:
+    while not stop_event.is_set():
+        flow = FLOW_CACHE.get(bot.id) or bot.flow
+        now = datetime.now()
+        task_nodes = [node for node in flow.nodes if node.get("data", {}).get("kind") == "task"]
+        for task_node in task_nodes:
+            task_id = task_node.get("id") or ""
+            if not task_id:
+                continue
+            last_run = last_run_by_task.get(task_id)
+            if not should_run_task(task_node, now, last_run):
+                continue
+            targets = await collect_scheduled_targets(flow, task_id, bot.id, telegram_bot)
+            await send_scheduled_targets_with_delay(flow, telegram_bot, targets)
+            last_run_by_task[task_id] = now
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=20)
+        except asyncio.TimeoutError:
+            continue
 def find_reply_button_by_text(flow: Flow, text: str) -> Optional[dict]:
     needle = text.strip().lower()
     if not needle:
@@ -1022,20 +1561,32 @@ async def run_bot_polling(bot: Bot) -> None:
         return
     dispatcher = Dispatcher()
     telegram_bot = TelegramBot(bot.token)
+    bot_user = await telegram_bot.get_me()
+    bot_user_id = bot_user.id if bot_user else None
+    chat_admin_cache: Dict[int, bool] = {}
+    last_run_by_task: Dict[str, datetime] = {}
+    stop_event = asyncio.Event()
+    scheduler_task = asyncio.create_task(task_scheduler_loop(bot, telegram_bot, stop_event, last_run_by_task))
     async def handler(message: Message) -> None:
         await ensure_user_row(bot.id, message.from_user, telegram_bot)
+        if bot_user_id is not None:
+            await ensure_chat_row(bot.id, message.chat, telegram_bot, bot_user_id, chat_admin_cache)
         command = normalize_command(message.text or "")
         flow = FLOW_CACHE.get(bot.id) or bot.flow
         user_id = message.from_user.id if message.from_user else None
         if command:
             command_node = find_command_node(flow, command)
             if command_node:
-                targets = collect_content_targets_with_delay(flow, command_node.get("id") or "", message, bot.id, user_id)
+                targets = await collect_content_targets_with_delay(
+                    flow, command_node.get("id") or "", message, bot.id, user_id
+                )
                 await send_targets_with_delay(flow, message, targets, message.from_user)
                 return
         reply_button = find_reply_button_by_text(flow, message.text or "")
         if reply_button:
-            targets = collect_content_targets_with_delay(flow, reply_button.get("id") or "", message, bot.id, user_id)
+            targets = await collect_content_targets_with_delay(
+                flow, reply_button.get("id") or "", message, bot.id, user_id
+            )
             if targets:
                 await send_targets_with_delay(flow, message, targets, message.from_user)
                 return
@@ -1044,14 +1595,25 @@ async def run_bot_polling(bot: Bot) -> None:
             all_targets: List[Tuple[dict, float, Optional[int]]] = []
             for webhook_node in webhook_nodes:
                 all_targets.extend(
-                    collect_content_targets_with_delay(flow, webhook_node.get("id") or "", message, bot.id, user_id)
+                    await collect_content_targets_with_delay(
+                        flow, webhook_node.get("id") or "", message, bot.id, user_id
+                    )
                 )
             await send_targets_with_delay(flow, message, all_targets, message.from_user)
 
     dispatcher.message()(handler)
 
+    async def channel_post_handler(message: Message) -> None:
+        if bot_user_id is None:
+            return
+        await ensure_chat_row(bot.id, message.chat, telegram_bot, bot_user_id, chat_admin_cache)
+
+    dispatcher.channel_post()(channel_post_handler)
+
     async def callback_handler(query: CallbackQuery) -> None:
         await ensure_user_row(bot.id, query.from_user, telegram_bot)
+        if bot_user_id is not None and query.message:
+            await ensure_chat_row(bot.id, query.message.chat, telegram_bot, bot_user_id, chat_admin_cache)
         data = (query.data or "").strip()
         await query.answer()
         if not data:
@@ -1062,7 +1624,7 @@ async def run_bot_polling(bot: Bot) -> None:
         user_id = query.from_user.id if query.from_user else None
         if data.startswith("btn:"):
             button_id = data[4:]
-            targets = collect_content_targets_with_delay(flow, button_id, query.message, bot.id, user_id)
+            targets = await collect_content_targets_with_delay(flow, button_id, query.message, bot.id, user_id)
             await send_targets_with_delay(flow, query.message, targets, query.from_user)
             return
         if data.startswith("/"):
@@ -1071,21 +1633,24 @@ async def run_bot_polling(bot: Bot) -> None:
             if command:
                 command_node = find_command_node(flow, command)
                 if command_node:
-                    targets = collect_content_targets_with_delay(flow, command_node.get("id") or "", query.message, bot.id, user_id)
+                    targets = await collect_content_targets_with_delay(
+                        flow, command_node.get("id") or "", query.message, bot.id, user_id
+                    )
                     await send_targets_with_delay(flow, query.message, targets, query.from_user)
                 return
         await query.message.answer(data)
 
     dispatcher.callback_query()(callback_handler)
 
-    stop_event = asyncio.Event()
-    RUNNING_BOTS[bot.id] = {"task": asyncio.current_task(), "stop": stop_event}
+    RUNNING_BOTS[bot.id] = {"task": asyncio.current_task(), "stop": stop_event, "scheduler": scheduler_task}
 
     try:
         await telegram_bot.delete_webhook(drop_pending_updates=True)
         await dispatcher.start_polling(telegram_bot, stop_event=stop_event)
     finally:
         await telegram_bot.session.close()
+        if scheduler_task:
+            scheduler_task.cancel()
         RUNNING_BOTS.pop(bot.id, None)
 
 
@@ -1095,6 +1660,7 @@ async def stop_bot_task(bot_id: str) -> None:
         return
     stop_event = entry.get("stop")
     task = entry.get("task")
+    scheduler = entry.get("scheduler")
     if isinstance(stop_event, asyncio.Event):
         stop_event.set()
     if isinstance(task, asyncio.Task):
@@ -1102,6 +1668,13 @@ async def stop_bot_task(bot_id: str) -> None:
             await asyncio.wait_for(task, timeout=5)
         except asyncio.TimeoutError:
             task.cancel()
+        except Exception:
+            pass
+    if isinstance(scheduler, asyncio.Task):
+        try:
+            await asyncio.wait_for(scheduler, timeout=5)
+        except asyncio.TimeoutError:
+            scheduler.cancel()
         except Exception:
             pass
     RUNNING_BOTS.pop(bot_id, None)
@@ -1141,6 +1714,12 @@ def get_bot(bot_id: str) -> Bot:
 def list_bot_users(bot_id: str) -> List[dict]:
     get_bot_or_404(bot_id)
     return list_users(bot_id)
+
+
+@app.get("/bots/{bot_id}/chats")
+def list_bot_chats(bot_id: str) -> List[dict]:
+    get_bot_or_404(bot_id)
+    return list_chats(bot_id)
 
 
 @app.patch("/bots/{bot_id}", response_model=Bot)

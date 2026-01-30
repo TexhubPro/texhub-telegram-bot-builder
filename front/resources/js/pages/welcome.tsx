@@ -17,6 +17,7 @@ import { AddEdgeMenuContext } from '../components/nodes/add-edge-context';
 import { BotActionsContext } from '../components/nodes/bot-actions-context';
 import { BotNode } from '../components/nodes/bot-node';
 import { ButtonRowNode } from '../components/nodes/button-row-node';
+import { BroadcastNode } from '../components/nodes/broadcast-node';
 import { CommandNode } from '../components/nodes/command-node';
 import { ConditionNode } from '../components/nodes/condition-node';
 import { NodeContextMenu } from '../components/nodes/context-menu';
@@ -32,9 +33,11 @@ import { MessageNode } from '../components/nodes/message-node';
 import { ReplyClearNode } from '../components/nodes/reply-clear-node';
 import { ReplyButtonNode } from '../components/nodes/reply-button-node';
 import { StyledNode } from '../components/nodes/styled-node';
+import { TaskNode } from '../components/nodes/task-node';
 import { TimerNode } from '../components/nodes/timer-node';
 import { StatusGetNode } from '../components/nodes/status-get-node';
 import { StatusSetNode } from '../components/nodes/status-set-node';
+import { SubscriptionNode } from '../components/nodes/subscription-node';
 import { VideoNode } from '../components/nodes/video-node';
 import { WebhookNode } from '../components/nodes/webhook-node';
 import { NodeEditorPanel } from '../components/sidebar/node-editor-panel';
@@ -63,6 +66,9 @@ const NODE_KIND_LABELS: Record<NodeKind, string> = {
     chat: 'Чат',
     status_set: 'Статус',
     status_get: 'Статус',
+    task: 'Задача',
+    broadcast: 'Рассылка',
+    subscription: 'Подписка',
     webhook: 'Вебхук',
     condition: 'Проверка',
     button_row: 'Rows',
@@ -115,6 +121,22 @@ const getNodeTitle = (node: Node<NodeData>) => {
         }
         case 'status_get':
             return 'Получить статус';
+        case 'task': {
+            const schedule = node.data.taskScheduleType ?? 'interval';
+            if (schedule === 'daily') {
+                return node.data.taskDailyTime ? `Задача: ${node.data.taskDailyTime}` : 'Задача ежедневно';
+            }
+            if (schedule === 'datetime') {
+                return node.data.taskRunAt ? `Задача: ${node.data.taskRunAt}` : 'Задача разово';
+            }
+            return 'Задача по интервалу';
+        }
+        case 'broadcast':
+            return 'Рассылка';
+        case 'subscription': {
+            const title = (node.data.subscriptionChatTitle ?? '').trim();
+            return title ? `Подписка: ${title}` : 'Проверка подписки';
+        }
         case 'webhook':
             return 'Сообщение пользователя';
         case 'condition':
@@ -184,6 +206,13 @@ const buildEditorValues = (node: Node<NodeData>) => {
         buttonCopyText: node.data.buttonCopyText ?? '',
         replyAction: node.data.replyAction ?? 'text',
         replyWebAppUrl: node.data.replyWebAppUrl ?? '',
+        subscriptionChatId:
+            node.data.subscriptionChatId !== undefined ? String(node.data.subscriptionChatId) : '',
+        taskScheduleType: node.data.taskScheduleType ?? 'interval',
+        taskIntervalMinutes:
+            node.data.taskIntervalMinutes !== undefined ? String(node.data.taskIntervalMinutes) : '60',
+        taskDailyTime: node.data.taskDailyTime ?? '10:00',
+        taskRunAt: node.data.taskRunAt ?? '',
         imageUrls: node.data.imageUrls ?? [],
         imageFiles: [] as File[],
         videoUrls: node.data.videoUrls ?? [],
@@ -214,6 +243,7 @@ export default function Welcome() {
     const [searchTerm, setSearchTerm] = useState('');
     const [editorNodeId, setEditorNodeId] = useState<string | null>(null);
     const [chatOptions, setChatOptions] = useState<{ id: number; label: string }[]>([]);
+    const [subscriptionOptions, setSubscriptionOptions] = useState<{ id: number; label: string }[]>([]);
     const [editorValues, setEditorValues] = useState({
         commandText: '',
         messageText: '',
@@ -224,6 +254,11 @@ export default function Welcome() {
         buttonCopyText: '',
         replyAction: 'text',
         replyWebAppUrl: '',
+        subscriptionChatId: '',
+        taskScheduleType: 'interval',
+        taskIntervalMinutes: '60',
+        taskDailyTime: '10:00',
+        taskRunAt: '',
         imageUrls: [] as string[],
         imageFiles: [] as File[],
         videoUrls: [] as string[],
@@ -261,6 +296,9 @@ export default function Welcome() {
             chat: ChatNode,
             status_set: StatusSetNode,
             status_get: StatusGetNode,
+            task: TaskNode,
+            broadcast: BroadcastNode,
+            subscription: SubscriptionNode,
             video: VideoNode,
             audio: AudioNode,
             document: DocumentNode,
@@ -461,6 +499,31 @@ export default function Welcome() {
         });
     }, [addNode, generateId]);
 
+    const handleAddTaskNode = useCallback(() => {
+        addNodeAndEdit({
+            id: generateId('task'),
+            type: 'task',
+            position: { x: 220, y: 220 },
+            data: {
+                label: 'Задача',
+                kind: 'task',
+                taskScheduleType: 'interval',
+                taskIntervalMinutes: 60,
+                taskDailyTime: '10:00',
+                taskRunAt: '',
+            },
+        });
+    }, [addNodeAndEdit, generateId]);
+
+    const handleAddBroadcastNode = useCallback(() => {
+        addNode({
+            id: generateId('broadcast'),
+            type: 'broadcast',
+            position: { x: 520, y: 220 },
+            data: { label: 'Рассылка', kind: 'broadcast' },
+        });
+    }, [addNode, generateId]);
+
     const handleAddImageNode = useCallback(() => {
         addNodeAndEdit({
             id: generateId('image'),
@@ -512,6 +575,15 @@ export default function Welcome() {
             type: 'condition',
             position: { x: 520, y: 220 },
             data: { label: 'Проверка', kind: 'condition', conditionText: '', conditionType: '' },
+        });
+    }, [addNodeAndEdit, generateId]);
+
+    const handleAddSubscriptionNode = useCallback(() => {
+        addNodeAndEdit({
+            id: generateId('subscription'),
+            type: 'subscription',
+            position: { x: 520, y: 220 },
+            data: { label: 'Подписка', kind: 'subscription', subscriptionChatId: undefined, subscriptionChatTitle: '' },
         });
     }, [addNodeAndEdit, generateId]);
 
@@ -805,6 +877,40 @@ export default function Welcome() {
                 };
             }
 
+            if (templateKey === 'subscription') {
+                newNode = {
+                    id: generateId('subscription'),
+                    type: 'subscription',
+                    position,
+                    data: { label: 'Подписка', kind: 'subscription', subscriptionChatId: undefined, subscriptionChatTitle: '' },
+                };
+            }
+
+            if (templateKey === 'task') {
+                newNode = {
+                    id: generateId('task'),
+                    type: 'task',
+                    position,
+                    data: {
+                        label: 'Задача',
+                        kind: 'task',
+                        taskScheduleType: 'interval',
+                        taskIntervalMinutes: 60,
+                        taskDailyTime: '10:00',
+                        taskRunAt: '',
+                    },
+                };
+            }
+
+            if (templateKey === 'broadcast') {
+                newNode = {
+                    id: generateId('broadcast'),
+                    type: 'broadcast',
+                    position,
+                    data: { label: 'Рассылка', kind: 'broadcast' },
+                };
+            }
+
             if (!newNode) {
                 return;
             }
@@ -889,12 +995,18 @@ export default function Welcome() {
                         return { ...node, data: { ...node.data, messageText: editorValues.messageText } };
                     }
                     if (kind === 'message_button') {
+                        const buttonAction =
+                            editorValues.buttonAction === 'url' ||
+                            editorValues.buttonAction === 'web_app' ||
+                            editorValues.buttonAction === 'copy'
+                                ? editorValues.buttonAction
+                                : 'callback';
                         return {
                             ...node,
                             data: {
                                 ...node.data,
                                 buttonText: editorValues.buttonText,
-                                buttonAction: editorValues.buttonAction,
+                                buttonAction,
                                 buttonUrl: editorValues.buttonUrl.trim(),
                                 buttonWebAppUrl: editorValues.buttonWebAppUrl.trim(),
                                 buttonCopyText: editorValues.buttonCopyText,
@@ -902,12 +1014,13 @@ export default function Welcome() {
                         };
                     }
                     if (kind === 'reply_button') {
+                        const replyAction = editorValues.replyAction === 'web_app' ? 'web_app' : 'text';
                         return {
                             ...node,
                             data: {
                                 ...node.data,
                                 buttonText: editorValues.buttonText,
-                                replyAction: editorValues.replyAction,
+                                replyAction,
                                 replyWebAppUrl: editorValues.replyWebAppUrl.trim(),
                             },
                         };
@@ -928,8 +1041,35 @@ export default function Welcome() {
                             (chatId ? `ID ${chatId}` : '');
                         return { ...node, data: { ...node.data, chatId, chatTitle } };
                     }
+                    if (kind === 'subscription') {
+                        const parsedId = editorValues.subscriptionChatId ? Number(editorValues.subscriptionChatId) : undefined;
+                        const subscriptionChatId = Number.isFinite(parsedId) ? parsedId : undefined;
+                        const subscriptionChatTitle =
+                            subscriptionOptions.find((option) => option.id === subscriptionChatId)?.label ??
+                            (subscriptionChatId ? `ID ${subscriptionChatId}` : '');
+                        return {
+                            ...node,
+                            data: { ...node.data, subscriptionChatId, subscriptionChatTitle },
+                        };
+                    }
                     if (kind === 'status_set') {
                         return { ...node, data: { ...node.data, statusValue: editorValues.statusValue.trim() } };
+                    }
+                    if (kind === 'task') {
+                        const scheduleType = editorValues.taskScheduleType || 'interval';
+                        const intervalValue = Number(editorValues.taskIntervalMinutes);
+                        const intervalMinutes = Number.isFinite(intervalValue) && intervalValue > 0 ? intervalValue : 60;
+                        const dailyTime = editorValues.taskDailyTime || '10:00';
+                        return {
+                            ...node,
+                            data: {
+                                ...node.data,
+                                taskScheduleType: scheduleType,
+                                taskIntervalMinutes: intervalMinutes,
+                                taskDailyTime: dailyTime,
+                                taskRunAt: editorValues.taskRunAt || '',
+                            },
+                        };
                     }
                     if (kind === 'video') {
                         return { ...node, data: { ...node.data, videoUrls: editorValues.videoUrls } };
@@ -1038,7 +1178,7 @@ export default function Welcome() {
         };
 
         save().catch(() => closeEditor());
-    }, [chatOptions, closeEditor, editorNodeId, editorValues, nodes, setNodes]);
+    }, [chatOptions, closeEditor, editorNodeId, editorValues, nodes, setNodes, subscriptionOptions]);
 
     const handleEditNode = useCallback(
         (nodeId: string) => {
@@ -1189,7 +1329,13 @@ export default function Welcome() {
                     ) {
                         return true;
                     }
-                    if (target.data.kind === 'timer' || target.data.kind === 'condition' || target.data.kind === 'chat') {
+                    if (
+                        target.data.kind === 'timer' ||
+                        target.data.kind === 'condition' ||
+                        target.data.kind === 'subscription' ||
+                        target.data.kind === 'broadcast' ||
+                        target.data.kind === 'chat'
+                    ) {
                         stack.push(target.id);
                     }
                 }
@@ -1365,6 +1511,9 @@ export default function Welcome() {
                     node.data.kind === 'status_get' ||
                     node.data.kind === 'webhook' ||
                     node.data.kind === 'condition' ||
+                    node.data.kind === 'subscription' ||
+                    node.data.kind === 'task' ||
+                    node.data.kind === 'broadcast' ||
                     !sources.has(node.id);
                 if (node.data.canAddChild === canAddChild) {
                     return node;
@@ -1404,6 +1553,36 @@ export default function Welcome() {
             isMounted = false;
         };
     }, [bot, editorNode]);
+
+    useEffect(() => {
+        if (!bot || !editorNode || editorNode.data.kind !== 'subscription') {
+            return;
+        }
+        let isMounted = true;
+        fetch(`${API_BASE}/bots/${bot.id}/chats`)
+            .then((response) => (response.ok ? response.json() : Promise.reject()))
+            .then((payload: Array<{ id: number; title?: string | null; username?: string | null; type?: string | null }>) => {
+                if (!isMounted) {
+                    return;
+                }
+                const options = payload.map((chat) => {
+                    const title = (chat.title || '').trim();
+                    const username = chat.username ? `@${chat.username}` : '';
+                    const suffix = [username, chat.type].filter(Boolean).join(' · ');
+                    const label = suffix && title ? `${title} (${suffix})` : title || username || `ID ${chat.id}`;
+                    return { id: chat.id, label };
+                });
+                setSubscriptionOptions(options);
+            })
+            .catch(() => {
+                if (isMounted) {
+                    setSubscriptionOptions([]);
+                }
+            });
+        return () => {
+            isMounted = false;
+        };
+    }, [bot, editorNode]);
     const linkCandidates = useMemo(() => {
         if (!menu || menu.kind !== 'add-edge') {
             return [];
@@ -1425,6 +1604,9 @@ export default function Welcome() {
                         node.data.kind === 'chat' ||
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
+                        node.data.kind === 'subscription' ||
+                        node.data.kind === 'task' ||
+                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'image' ||
                         node.data.kind === 'video' ||
                         node.data.kind === 'audio' ||
@@ -1444,6 +1626,9 @@ export default function Welcome() {
                         node.data.kind === 'chat' ||
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
+                        node.data.kind === 'subscription' ||
+                        node.data.kind === 'task' ||
+                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'timer'
                 );
             }
@@ -1460,6 +1645,9 @@ export default function Welcome() {
                         node.data.kind === 'chat' ||
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
+                        node.data.kind === 'subscription' ||
+                        node.data.kind === 'task' ||
+                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'timer'
                 );
             }
@@ -1472,6 +1660,9 @@ export default function Welcome() {
                         node.data.kind === 'chat' ||
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
+                        node.data.kind === 'subscription' ||
+                        node.data.kind === 'task' ||
+                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'message' ||
                         node.data.kind === 'image' ||
                         node.data.kind === 'video' ||
@@ -1493,6 +1684,9 @@ export default function Welcome() {
                         node.data.kind === 'chat' ||
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
+                        node.data.kind === 'subscription' ||
+                        node.data.kind === 'task' ||
+                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'timer'
                 );
             }
@@ -1508,6 +1702,9 @@ export default function Welcome() {
                         node.data.kind === 'video' ||
                         node.data.kind === 'audio' ||
                         node.data.kind === 'document' ||
+                        node.data.kind === 'subscription' ||
+                        node.data.kind === 'task' ||
+                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'timer'
                 );
             }
@@ -1533,7 +1730,10 @@ export default function Welcome() {
                         node.data.kind === 'edit_message' ||
                         node.data.kind === 'chat' ||
                         node.data.kind === 'status_set' ||
-                        node.data.kind === 'status_get'
+                        node.data.kind === 'status_get' ||
+                        node.data.kind === 'subscription' ||
+                        node.data.kind === 'task' ||
+                        node.data.kind === 'broadcast'
                 );
             }
             if (sourceKind === 'delete_message') {
@@ -1545,6 +1745,9 @@ export default function Welcome() {
                         node.data.kind === 'video' ||
                         node.data.kind === 'audio' ||
                         node.data.kind === 'document' ||
+                        node.data.kind === 'subscription' ||
+                        node.data.kind === 'task' ||
+                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'timer'
                 );
             }
@@ -1560,6 +1763,9 @@ export default function Welcome() {
                         node.data.kind === 'chat' ||
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
+                        node.data.kind === 'subscription' ||
+                        node.data.kind === 'task' ||
+                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'image' ||
                         node.data.kind === 'video' ||
                         node.data.kind === 'audio' ||
@@ -1577,6 +1783,64 @@ export default function Welcome() {
                         node.data.kind === 'document' ||
                         node.data.kind === 'delete_message' ||
                         node.data.kind === 'edit_message' ||
+                        node.data.kind === 'subscription' ||
+                        node.data.kind === 'task' ||
+                        node.data.kind === 'broadcast' ||
+                        node.data.kind === 'timer'
+                );
+            }
+            if (sourceKind === 'subscription') {
+                candidates = candidates.filter(
+                    (node) =>
+                        node.data.kind === 'message' ||
+                        node.data.kind === 'image' ||
+                        node.data.kind === 'video' ||
+                        node.data.kind === 'audio' ||
+                        node.data.kind === 'document' ||
+                        node.data.kind === 'delete_message' ||
+                        node.data.kind === 'edit_message' ||
+                        node.data.kind === 'chat' ||
+                        node.data.kind === 'status_set' ||
+                        node.data.kind === 'status_get' ||
+                        node.data.kind === 'timer' ||
+                        node.data.kind === 'task' ||
+                        node.data.kind === 'broadcast'
+                );
+            }
+            if (sourceKind === 'task') {
+                candidates = candidates.filter(
+                    (node) =>
+                        node.data.kind === 'broadcast' ||
+                        node.data.kind === 'condition' ||
+                        node.data.kind === 'subscription' ||
+                        node.data.kind === 'message' ||
+                        node.data.kind === 'image' ||
+                        node.data.kind === 'video' ||
+                        node.data.kind === 'audio' ||
+                        node.data.kind === 'document' ||
+                        node.data.kind === 'delete_message' ||
+                        node.data.kind === 'edit_message' ||
+                        node.data.kind === 'chat' ||
+                        node.data.kind === 'status_set' ||
+                        node.data.kind === 'status_get' ||
+                        node.data.kind === 'timer'
+                );
+            }
+            if (sourceKind === 'broadcast') {
+                candidates = candidates.filter(
+                    (node) =>
+                        node.data.kind === 'condition' ||
+                        node.data.kind === 'subscription' ||
+                        node.data.kind === 'message' ||
+                        node.data.kind === 'image' ||
+                        node.data.kind === 'video' ||
+                        node.data.kind === 'audio' ||
+                        node.data.kind === 'document' ||
+                        node.data.kind === 'delete_message' ||
+                        node.data.kind === 'edit_message' ||
+                        node.data.kind === 'chat' ||
+                        node.data.kind === 'status_set' ||
+                        node.data.kind === 'status_get' ||
                         node.data.kind === 'timer'
                 );
             }
@@ -1612,12 +1876,15 @@ export default function Welcome() {
             { key: 'chat', label: 'Чат', description: 'Отправить другому пользователю' },
             { key: 'status_set', label: 'Статус', description: 'Установить статус пользователя' },
             { key: 'status_get', label: 'Статус', description: 'Получить статус пользователя' },
+            { key: 'task', label: 'Задача', description: 'Расписание отправки' },
+            { key: 'broadcast', label: 'Рассылка', description: 'Отправить всем' },
             { key: 'image', label: 'Изображения', description: 'Один или больше файлов' },
             { key: 'video', label: 'Видео', description: 'Видео файлы' },
             { key: 'audio', label: 'Аудио', description: 'Аудио файлы' },
             { key: 'document', label: 'Документ', description: 'Файлы документов' },
             { key: 'webhook', label: 'Вебхук', description: 'Сообщение пользователя' },
             { key: 'condition', label: 'Проверка', description: 'Сравнить текст' },
+            { key: 'subscription', label: 'Подписка', description: 'Проверка подписки' },
         ],
         []
     );
@@ -1639,6 +1906,9 @@ export default function Welcome() {
                     item.key === 'chat' ||
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
+                    item.key === 'subscription' ||
+                    item.key === 'task' ||
+                    item.key === 'broadcast' ||
                     item.key === 'image' ||
                     item.key === 'video' ||
                     item.key === 'audio' ||
@@ -1658,6 +1928,9 @@ export default function Welcome() {
                     item.key === 'chat' ||
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
+                    item.key === 'subscription' ||
+                    item.key === 'task' ||
+                    item.key === 'broadcast' ||
                     item.key === 'timer'
             );
         }
@@ -1670,6 +1943,9 @@ export default function Welcome() {
                     item.key === 'chat' ||
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
+                    item.key === 'subscription' ||
+                    item.key === 'task' ||
+                    item.key === 'broadcast' ||
                     item.key === 'message' ||
                     item.key === 'image' ||
                     item.key === 'video' ||
@@ -1691,6 +1967,9 @@ export default function Welcome() {
                     item.key === 'chat' ||
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
+                    item.key === 'subscription' ||
+                    item.key === 'task' ||
+                    item.key === 'broadcast' ||
                     item.key === 'timer'
             );
         }
@@ -1707,6 +1986,9 @@ export default function Welcome() {
                     item.key === 'chat' ||
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
+                    item.key === 'subscription' ||
+                    item.key === 'task' ||
+                    item.key === 'broadcast' ||
                     item.key === 'timer'
             );
         }
@@ -1722,6 +2004,9 @@ export default function Welcome() {
                     item.key === 'video' ||
                     item.key === 'audio' ||
                     item.key === 'document' ||
+                    item.key === 'subscription' ||
+                    item.key === 'task' ||
+                    item.key === 'broadcast' ||
                     item.key === 'timer'
             );
         }
@@ -1747,7 +2032,10 @@ export default function Welcome() {
                     item.key === 'edit_message' ||
                     item.key === 'chat' ||
                     item.key === 'status_set' ||
-                    item.key === 'status_get'
+                    item.key === 'status_get' ||
+                    item.key === 'subscription' ||
+                    item.key === 'task' ||
+                    item.key === 'broadcast'
             );
         }
         if (sourceKind === 'delete_message') {
@@ -1759,6 +2047,9 @@ export default function Welcome() {
                     item.key === 'video' ||
                     item.key === 'audio' ||
                     item.key === 'document' ||
+                    item.key === 'subscription' ||
+                    item.key === 'task' ||
+                    item.key === 'broadcast' ||
                     item.key === 'timer'
             );
         }
@@ -1774,6 +2065,9 @@ export default function Welcome() {
                     item.key === 'chat' ||
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
+                    item.key === 'subscription' ||
+                    item.key === 'task' ||
+                    item.key === 'broadcast' ||
                     item.key === 'image' ||
                     item.key === 'video' ||
                     item.key === 'audio' ||
@@ -1791,6 +2085,64 @@ export default function Welcome() {
                     item.key === 'document' ||
                     item.key === 'delete_message' ||
                     item.key === 'edit_message' ||
+                    item.key === 'subscription' ||
+                    item.key === 'task' ||
+                    item.key === 'broadcast' ||
+                    item.key === 'timer'
+            );
+        }
+        if (sourceKind === 'subscription') {
+            templates = createTemplates.filter(
+                (item) =>
+                    item.key === 'message' ||
+                    item.key === 'image' ||
+                    item.key === 'video' ||
+                    item.key === 'audio' ||
+                    item.key === 'document' ||
+                    item.key === 'delete_message' ||
+                    item.key === 'edit_message' ||
+                    item.key === 'chat' ||
+                    item.key === 'status_set' ||
+                    item.key === 'status_get' ||
+                    item.key === 'timer' ||
+                    item.key === 'task' ||
+                    item.key === 'broadcast'
+            );
+        }
+        if (sourceKind === 'task') {
+            templates = createTemplates.filter(
+                (item) =>
+                    item.key === 'broadcast' ||
+                    item.key === 'condition' ||
+                    item.key === 'subscription' ||
+                    item.key === 'message' ||
+                    item.key === 'image' ||
+                    item.key === 'video' ||
+                    item.key === 'audio' ||
+                    item.key === 'document' ||
+                    item.key === 'delete_message' ||
+                    item.key === 'edit_message' ||
+                    item.key === 'chat' ||
+                    item.key === 'status_set' ||
+                    item.key === 'status_get' ||
+                    item.key === 'timer'
+            );
+        }
+        if (sourceKind === 'broadcast') {
+            templates = createTemplates.filter(
+                (item) =>
+                    item.key === 'condition' ||
+                    item.key === 'subscription' ||
+                    item.key === 'message' ||
+                    item.key === 'image' ||
+                    item.key === 'video' ||
+                    item.key === 'audio' ||
+                    item.key === 'document' ||
+                    item.key === 'delete_message' ||
+                    item.key === 'edit_message' ||
+                    item.key === 'chat' ||
+                    item.key === 'status_set' ||
+                    item.key === 'status_get' ||
                     item.key === 'timer'
             );
         }
@@ -1820,12 +2172,15 @@ export default function Welcome() {
             { key: 'chat', label: 'Чат', description: 'Отправить другому пользователю', action: handleAddChatNode },
             { key: 'status_set', label: 'Статус', description: 'Установить статус пользователя', action: handleAddStatusSetNode },
             { key: 'status_get', label: 'Статус', description: 'Получить статус пользователя', action: handleAddStatusGetNode },
+            { key: 'task', label: 'Задача', description: 'Расписание отправки', action: handleAddTaskNode },
+            { key: 'broadcast', label: 'Рассылка', description: 'Отправить всем', action: handleAddBroadcastNode },
             { key: 'image', label: 'Изображения', description: 'Один или больше файлов', action: handleAddImageNode },
             { key: 'video', label: 'Видео', description: 'Видео файлы', action: handleAddVideoNode },
             { key: 'audio', label: 'Аудио', description: 'Аудио файлы', action: handleAddAudioNode },
             { key: 'document', label: 'Документ', description: 'Файлы документов', action: handleAddDocumentNode },
             { key: 'webhook', label: 'Вебхук', description: 'Сообщение пользователя', action: handleAddWebhookNode },
             { key: 'condition', label: 'Проверка', description: 'Сравнить текст', action: handleAddConditionNode },
+            { key: 'subscription', label: 'Подписка', description: 'Проверка подписки', action: handleAddSubscriptionNode },
             { key: 'bot', label: 'Бот', description: 'Токен и статус', action: handleAddBot },
         ],
         [
@@ -1842,12 +2197,15 @@ export default function Welcome() {
             handleAddChatNode,
             handleAddStatusSetNode,
             handleAddStatusGetNode,
+            handleAddTaskNode,
+            handleAddBroadcastNode,
             handleAddImageNode,
             handleAddVideoNode,
             handleAddAudioNode,
             handleAddDocumentNode,
             handleAddWebhookNode,
             handleAddConditionNode,
+            handleAddSubscriptionNode,
         ]
     );
 
@@ -1934,6 +2292,7 @@ export default function Welcome() {
                         node={editorNode}
                         values={editorValues}
                         chatOptions={chatOptions}
+                        subscriptionOptions={subscriptionOptions}
                         onChange={setEditorValues}
                         onSave={handleSaveEditor}
                         onClose={closeEditor}
