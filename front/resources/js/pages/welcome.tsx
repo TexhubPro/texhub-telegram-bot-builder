@@ -20,6 +20,8 @@ import { ButtonRowNode } from '../components/nodes/button-row-node';
 import { CommandNode } from '../components/nodes/command-node';
 import { NodeContextMenu } from '../components/nodes/context-menu';
 import { GraphActionsContext } from '../components/nodes/graph-actions-context';
+import { AudioNode } from '../components/nodes/audio-node';
+import { DocumentNode } from '../components/nodes/document-node';
 import { ImageNode } from '../components/nodes/image-node';
 import { MessageButtonNode } from '../components/nodes/message-button-node';
 import { MessageNode } from '../components/nodes/message-node';
@@ -27,6 +29,7 @@ import { ReplyClearNode } from '../components/nodes/reply-clear-node';
 import { ReplyButtonNode } from '../components/nodes/reply-button-node';
 import { StyledNode } from '../components/nodes/styled-node';
 import { TimerNode } from '../components/nodes/timer-node';
+import { VideoNode } from '../components/nodes/video-node';
 import { NodeEditorPanel } from '../components/sidebar/node-editor-panel';
 import { Sidebar } from '../components/sidebar/sidebar';
 import { DeletableEdge } from '../components/edges/deletable-edge';
@@ -45,6 +48,9 @@ const NODE_KIND_LABELS: Record<NodeKind, string> = {
     reply_button: 'Reply Button',
     reply_clear: 'Clear Reply',
     timer: 'Таймер',
+    video: 'Видео',
+    audio: 'Аудио',
+    document: 'Документ',
     button_row: 'Rows',
     image: 'Изображения',
     node: 'Блок',
@@ -66,6 +72,18 @@ const getNodeTitle = (node: Node<NodeData>) => {
         case 'image': {
             const count = node.data.imageUrls?.length ?? 0;
             return count ? `Изображения (${count})` : 'Изображения';
+        }
+        case 'video': {
+            const count = node.data.videoUrls?.length ?? 0;
+            return count ? `Видео (${count})` : 'Видео';
+        }
+        case 'audio': {
+            const count = node.data.audioUrls?.length ?? 0;
+            return count ? `Аудио (${count})` : 'Аудио';
+        }
+        case 'document': {
+            const count = node.data.documentUrls?.length ?? 0;
+            return count ? `Документы (${count})` : 'Документы';
         }
         case 'timer': {
             const raw = node.data.timerSeconds ?? 0;
@@ -94,6 +112,12 @@ const buildEditorValues = (node: Node<NodeData>) => ({
     buttonText: node.data.buttonText ?? '',
     imageUrls: node.data.imageUrls ?? [],
     imageFiles: [] as File[],
+    videoUrls: node.data.videoUrls ?? [],
+    videoFiles: [] as File[],
+    audioUrls: node.data.audioUrls ?? [],
+    audioFiles: [] as File[],
+    documentUrls: node.data.documentUrls ?? [],
+    documentFiles: [] as File[],
     timerSeconds: node.data.timerSeconds !== undefined ? String(node.data.timerSeconds) : '',
 });
 
@@ -112,6 +136,12 @@ export default function Welcome() {
         buttonText: '',
         imageUrls: [] as string[],
         imageFiles: [] as File[],
+        videoUrls: [] as string[],
+        videoFiles: [] as File[],
+        audioUrls: [] as string[],
+        audioFiles: [] as File[],
+        documentUrls: [] as string[],
+        documentFiles: [] as File[],
         timerSeconds: '',
     });
     const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -128,6 +158,9 @@ export default function Welcome() {
             reply_button: ReplyButtonNode,
             reply_clear: ReplyClearNode,
             timer: TimerNode,
+            video: VideoNode,
+            audio: AudioNode,
+            document: DocumentNode,
             button_row: ButtonRowNode,
             image: ImageNode,
             bot: BotNode,
@@ -279,6 +312,33 @@ export default function Welcome() {
             type: 'image',
             position: { x: 520, y: 220 },
             data: { label: 'Изображения', kind: 'image', imageUrls: [] },
+        });
+    }, [addNodeAndEdit, generateId]);
+
+    const handleAddVideoNode = useCallback(() => {
+        addNodeAndEdit({
+            id: generateId('video'),
+            type: 'video',
+            position: { x: 520, y: 220 },
+            data: { label: 'Видео', kind: 'video', videoUrls: [] },
+        });
+    }, [addNodeAndEdit, generateId]);
+
+    const handleAddAudioNode = useCallback(() => {
+        addNodeAndEdit({
+            id: generateId('audio'),
+            type: 'audio',
+            position: { x: 520, y: 220 },
+            data: { label: 'Аудио', kind: 'audio', audioUrls: [] },
+        });
+    }, [addNodeAndEdit, generateId]);
+
+    const handleAddDocumentNode = useCallback(() => {
+        addNodeAndEdit({
+            id: generateId('document'),
+            type: 'document',
+            position: { x: 520, y: 220 },
+            data: { label: 'Документ', kind: 'document', documentUrls: [] },
         });
     }, [addNodeAndEdit, generateId]);
 
@@ -453,6 +513,33 @@ export default function Welcome() {
                 };
             }
 
+            if (templateKey === 'video') {
+                newNode = {
+                    id: generateId('video'),
+                    type: 'video',
+                    position,
+                    data: { label: 'Видео', kind: 'video', videoUrls: [] },
+                };
+            }
+
+            if (templateKey === 'audio') {
+                newNode = {
+                    id: generateId('audio'),
+                    type: 'audio',
+                    position,
+                    data: { label: 'Аудио', kind: 'audio', audioUrls: [] },
+                };
+            }
+
+            if (templateKey === 'document') {
+                newNode = {
+                    id: generateId('document'),
+                    type: 'document',
+                    position,
+                    data: { label: 'Документ', kind: 'document', documentUrls: [] },
+                };
+            }
+
             if (!newNode) {
                 return;
             }
@@ -538,6 +625,15 @@ export default function Welcome() {
                         const seconds = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
                         return { ...node, data: { ...node.data, timerSeconds: seconds } };
                     }
+                    if (kind === 'video') {
+                        return { ...node, data: { ...node.data, videoUrls: editorValues.videoUrls } };
+                    }
+                    if (kind === 'audio') {
+                        return { ...node, data: { ...node.data, audioUrls: editorValues.audioUrls } };
+                    }
+                    if (kind === 'document') {
+                        return { ...node, data: { ...node.data, documentUrls: editorValues.documentUrls } };
+                    }
                     return node;
                 })
             );
@@ -559,6 +655,61 @@ export default function Welcome() {
                     })
                 );
                 setEditorValues((prev) => ({ ...prev, imageFiles: [], imageUrls: [...prev.imageUrls, ...uploaded] }));
+            }
+            if (node?.data.kind === 'video') {
+                const uploaded = await uploadImages(editorValues.videoFiles);
+                if (editorValues.videoFiles.length && !uploaded.length) {
+                    window.alert('Не удалось загрузить видео. Проверь backend и повтори.');
+                    return;
+                }
+                setNodes((nds) =>
+                    nds.map((item) => {
+                        if (item.id !== editorNodeId) {
+                            return item;
+                        }
+                        const merged = [...(editorValues.videoUrls ?? []), ...uploaded];
+                        return { ...item, data: { ...item.data, videoUrls: merged } };
+                    })
+                );
+                setEditorValues((prev) => ({ ...prev, videoFiles: [], videoUrls: [...prev.videoUrls, ...uploaded] }));
+            }
+            if (node?.data.kind === 'audio') {
+                const uploaded = await uploadImages(editorValues.audioFiles);
+                if (editorValues.audioFiles.length && !uploaded.length) {
+                    window.alert('Не удалось загрузить аудио. Проверь backend и повтори.');
+                    return;
+                }
+                setNodes((nds) =>
+                    nds.map((item) => {
+                        if (item.id !== editorNodeId) {
+                            return item;
+                        }
+                        const merged = [...(editorValues.audioUrls ?? []), ...uploaded];
+                        return { ...item, data: { ...item.data, audioUrls: merged } };
+                    })
+                );
+                setEditorValues((prev) => ({ ...prev, audioFiles: [], audioUrls: [...prev.audioUrls, ...uploaded] }));
+            }
+            if (node?.data.kind === 'document') {
+                const uploaded = await uploadImages(editorValues.documentFiles);
+                if (editorValues.documentFiles.length && !uploaded.length) {
+                    window.alert('Не удалось загрузить документ. Проверь backend и повтори.');
+                    return;
+                }
+                setNodes((nds) =>
+                    nds.map((item) => {
+                        if (item.id !== editorNodeId) {
+                            return item;
+                        }
+                        const merged = [...(editorValues.documentUrls ?? []), ...uploaded];
+                        return { ...item, data: { ...item.data, documentUrls: merged } };
+                    })
+                );
+                setEditorValues((prev) => ({
+                    ...prev,
+                    documentFiles: [],
+                    documentUrls: [...prev.documentUrls, ...uploaded],
+                }));
             }
             closeEditor();
         };
@@ -618,7 +769,13 @@ export default function Welcome() {
                     if (!target) {
                         continue;
                     }
-                    if (target.data.kind === 'message' || target.data.kind === 'image') {
+                    if (
+                        target.data.kind === 'message' ||
+                        target.data.kind === 'image' ||
+                        target.data.kind === 'video' ||
+                        target.data.kind === 'audio' ||
+                        target.data.kind === 'document'
+                    ) {
                         return true;
                     }
                     if (target.data.kind === 'timer') {
@@ -630,7 +787,7 @@ export default function Welcome() {
         };
         const disconnected = commandNodes.filter((node) => !hasContentTarget(node.id));
         if (disconnected.length) {
-            window.alert('Подключи каждую команду к следующей ноде (сообщение или изображения).');
+            window.alert('Подключи каждую команду к следующей ноде (сообщение/медиа, можно через таймер).');
             return;
         }
         const response = await fetch(`${API_BASE}/bots/${bot.id}/start`, { method: 'POST' });
@@ -785,6 +942,9 @@ export default function Welcome() {
                 const canAddChild =
                     node.data.kind === 'message' ||
                     node.data.kind === 'image' ||
+                    node.data.kind === 'video' ||
+                    node.data.kind === 'audio' ||
+                    node.data.kind === 'document' ||
                     node.data.kind === 'button_row' ||
                     node.data.kind === 'timer' ||
                     !sources.has(node.id);
@@ -815,22 +975,35 @@ export default function Welcome() {
                         node.data.kind === 'button_row' ||
                         node.data.kind === 'reply_clear' ||
                         node.data.kind === 'timer' ||
-                        node.data.kind === 'image'
+                        node.data.kind === 'image' ||
+                        node.data.kind === 'video' ||
+                        node.data.kind === 'audio' ||
+                        node.data.kind === 'document'
                 );
             }
             if (sourceKind === 'message_button' || sourceKind === 'reply_button') {
                 candidates = candidates.filter(
                     (node) =>
-                        node.data.kind === 'message' || node.data.kind === 'image' || node.data.kind === 'timer'
+                        node.data.kind === 'message' ||
+                        node.data.kind === 'image' ||
+                        node.data.kind === 'video' ||
+                        node.data.kind === 'audio' ||
+                        node.data.kind === 'document' ||
+                        node.data.kind === 'timer'
                 );
             }
             if (sourceKind === 'command') {
                 candidates = candidates.filter(
                     (node) =>
-                        node.data.kind === 'message' || node.data.kind === 'image' || node.data.kind === 'timer'
+                        node.data.kind === 'message' ||
+                        node.data.kind === 'image' ||
+                        node.data.kind === 'video' ||
+                        node.data.kind === 'audio' ||
+                        node.data.kind === 'document' ||
+                        node.data.kind === 'timer'
                 );
             }
-            if (sourceKind === 'image') {
+            if (sourceKind === 'image' || sourceKind === 'video' || sourceKind === 'audio' || sourceKind === 'document') {
                 candidates = candidates.filter(
                     (node) =>
                         node.data.kind === 'message_button' ||
@@ -842,7 +1015,12 @@ export default function Welcome() {
             }
             if (sourceKind === 'timer') {
                 candidates = candidates.filter(
-                    (node) => node.data.kind === 'message' || node.data.kind === 'image'
+                    (node) =>
+                        node.data.kind === 'message' ||
+                        node.data.kind === 'image' ||
+                        node.data.kind === 'video' ||
+                        node.data.kind === 'audio' ||
+                        node.data.kind === 'document'
                 );
             }
             if (sourceKind === 'button_row') {
@@ -873,6 +1051,9 @@ export default function Welcome() {
             { key: 'reply_clear', label: 'Clear Reply', description: 'Очистить reply-кнопки' },
             { key: 'timer', label: 'Таймер', description: 'Задержка перед сообщением' },
             { key: 'image', label: 'Изображения', description: 'Один или больше файлов' },
+            { key: 'video', label: 'Видео', description: 'Видео файлы' },
+            { key: 'audio', label: 'Аудио', description: 'Аудио файлы' },
+            { key: 'document', label: 'Документ', description: 'Файлы документов' },
         ],
         []
     );
@@ -889,20 +1070,35 @@ export default function Welcome() {
                     item.key === 'button_row' ||
                     item.key === 'reply_clear' ||
                     item.key === 'timer' ||
-                    item.key === 'image'
+                    item.key === 'image' ||
+                    item.key === 'video' ||
+                    item.key === 'audio' ||
+                    item.key === 'document'
             );
         }
         if (sourceKind === 'command') {
             templates = createTemplates.filter(
-                (item) => item.key === 'message' || item.key === 'image' || item.key === 'timer'
+                (item) =>
+                    item.key === 'message' ||
+                    item.key === 'image' ||
+                    item.key === 'video' ||
+                    item.key === 'audio' ||
+                    item.key === 'document' ||
+                    item.key === 'timer'
             );
         }
         if (sourceKind === 'message_button' || sourceKind === 'reply_button') {
             templates = createTemplates.filter(
-                (item) => item.key === 'message' || item.key === 'image' || item.key === 'timer'
+                (item) =>
+                    item.key === 'message' ||
+                    item.key === 'image' ||
+                    item.key === 'video' ||
+                    item.key === 'audio' ||
+                    item.key === 'document' ||
+                    item.key === 'timer'
             );
         }
-        if (sourceKind === 'image') {
+        if (sourceKind === 'image' || sourceKind === 'video' || sourceKind === 'audio' || sourceKind === 'document') {
             templates = createTemplates.filter(
                 (item) =>
                     item.key === 'message_button' ||
@@ -913,7 +1109,14 @@ export default function Welcome() {
             );
         }
         if (sourceKind === 'timer') {
-            templates = createTemplates.filter((item) => item.key === 'message' || item.key === 'image');
+            templates = createTemplates.filter(
+                (item) =>
+                    item.key === 'message' ||
+                    item.key === 'image' ||
+                    item.key === 'video' ||
+                    item.key === 'audio' ||
+                    item.key === 'document'
+            );
         }
         if (sourceKind === 'button_row') {
             templates = createTemplates.filter(
@@ -937,6 +1140,9 @@ export default function Welcome() {
             { key: 'reply_clear', label: 'Clear Reply', description: 'Очистить reply-кнопки', action: handleAddReplyClearNode },
             { key: 'timer', label: 'Таймер', description: 'Задержка перед сообщением', action: handleAddTimerNode },
             { key: 'image', label: 'Изображения', description: 'Один или больше файлов', action: handleAddImageNode },
+            { key: 'video', label: 'Видео', description: 'Видео файлы', action: handleAddVideoNode },
+            { key: 'audio', label: 'Аудио', description: 'Аудио файлы', action: handleAddAudioNode },
+            { key: 'document', label: 'Документ', description: 'Файлы документов', action: handleAddDocumentNode },
             { key: 'bot', label: 'Бот', description: 'Токен и статус', action: handleAddBot },
         ],
         [
@@ -949,6 +1155,9 @@ export default function Welcome() {
             handleAddReplyClearNode,
             handleAddTimerNode,
             handleAddImageNode,
+            handleAddVideoNode,
+            handleAddAudioNode,
+            handleAddDocumentNode,
         ]
     );
 

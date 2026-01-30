@@ -13,7 +13,7 @@ export function MessageNode({ data, id }: NodeProps<NodeData>) {
             <NodeActionButtons nodeId={id} canEdit />
             <div className="max-w-96 min-w-fit">
                 <div className="text-xs font-semibold tracking-wide text-amber-700 uppercase">Сообщение</div>
-                <div className="text-sm font-semibold">{data.messageText ?? 'Привет'}</div>
+                <div className="text-sm font-semibold whitespace-break-spaces">{data.messageText ?? 'Привет'}</div>
             </div>
             <Handle type="source" position={Position.Right} style={{ width: 14, height: 14, borderWidth: 2, background: '#b45309' }} />
             {data.canAddChild ? (

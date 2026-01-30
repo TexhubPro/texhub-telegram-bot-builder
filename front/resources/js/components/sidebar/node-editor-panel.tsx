@@ -4,6 +4,7 @@ import type { NodeData, NodeKind } from '../types';
 import { FieldInput } from '../ui/field-input';
 import { FieldTextarea } from '../ui/field-textarea';
 import { ImageFileInput } from '../ui/image-file-input';
+import { MediaFileInput } from '../ui/media-file-input';
 import { TrashIcon } from '../ui/icons';
 
 type Values = {
@@ -13,6 +14,12 @@ type Values = {
     imageUrls: string[];
     imageFiles: File[];
     timerSeconds: string;
+    videoUrls: string[];
+    videoFiles: File[];
+    audioUrls: string[];
+    audioFiles: File[];
+    documentUrls: string[];
+    documentFiles: File[];
 };
 
 type Props = {
@@ -35,6 +42,12 @@ const getTitle = (kind?: NodeKind) => {
             return 'Reply Button';
         case 'timer':
             return 'Таймер';
+        case 'video':
+            return 'Видео';
+        case 'audio':
+            return 'Аудио';
+        case 'document':
+            return 'Документ';
         case 'image':
             return 'Изображения';
         default:
@@ -53,6 +66,11 @@ export function NodeEditorPanel({ node, values, onChange, onSave, onClose }: Pro
 
     const kind = node.data.kind;
     const title = getTitle(kind);
+    const getFileLabel = (value: string) => {
+        const trimmed = value.split('?')[0];
+        const parts = trimmed.split('/');
+        return parts[parts.length - 1] || value;
+    };
 
     return (
         <aside className="flex h-full w-80 flex-col border-l border-slate-200/70 bg-white/80 p-4 backdrop-blur">
@@ -150,6 +168,177 @@ export function NodeEditorPanel({ node, values, onChange, onSave, onClose }: Pro
                                                             })
                                                         }
                                                         className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white shadow-sm"
+                                                        aria-label="Удалить"
+                                                    >
+                                                        <TrashIcon />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ) : null}
+                            {kind === 'video' ? (
+                                <div className="flex flex-col gap-3">
+                                    <MediaFileInput
+                                        label="Добавить видео"
+                                        accept="video/*"
+                                        onChange={(files) =>
+                                            onChange({ ...values, videoFiles: [...values.videoFiles, ...files] })
+                                        }
+                                    />
+                                    {values.videoUrls.length || values.videoFiles.length ? (
+                                        <div className="flex flex-col gap-2">
+                                            {values.videoUrls.map((url) => (
+                                                <div
+                                                    key={url}
+                                                    className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                                                >
+                                                    <span className="truncate">{getFileLabel(url)}</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            onChange({
+                                                                ...values,
+                                                                videoUrls: values.videoUrls.filter((item) => item !== url),
+                                                            })
+                                                        }
+                                                        className="flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white"
+                                                        aria-label="Удалить"
+                                                    >
+                                                        <TrashIcon />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                            {values.videoFiles.map((file, index) => (
+                                                <div
+                                                    key={`${file.name}-${file.lastModified}`}
+                                                    className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                                                >
+                                                    <span className="truncate">{file.name}</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            onChange({
+                                                                ...values,
+                                                                videoFiles: values.videoFiles.filter((_, idx) => idx !== index),
+                                                            })
+                                                        }
+                                                        className="flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white"
+                                                        aria-label="Удалить"
+                                                    >
+                                                        <TrashIcon />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ) : null}
+                            {kind === 'audio' ? (
+                                <div className="flex flex-col gap-3">
+                                    <MediaFileInput
+                                        label="Добавить аудио"
+                                        accept="audio/*"
+                                        onChange={(files) =>
+                                            onChange({ ...values, audioFiles: [...values.audioFiles, ...files] })
+                                        }
+                                    />
+                                    {values.audioUrls.length || values.audioFiles.length ? (
+                                        <div className="flex flex-col gap-2">
+                                            {values.audioUrls.map((url) => (
+                                                <div
+                                                    key={url}
+                                                    className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                                                >
+                                                    <span className="truncate">{getFileLabel(url)}</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            onChange({
+                                                                ...values,
+                                                                audioUrls: values.audioUrls.filter((item) => item !== url),
+                                                            })
+                                                        }
+                                                        className="flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white"
+                                                        aria-label="Удалить"
+                                                    >
+                                                        <TrashIcon />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                            {values.audioFiles.map((file, index) => (
+                                                <div
+                                                    key={`${file.name}-${file.lastModified}`}
+                                                    className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                                                >
+                                                    <span className="truncate">{file.name}</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            onChange({
+                                                                ...values,
+                                                                audioFiles: values.audioFiles.filter((_, idx) => idx !== index),
+                                                            })
+                                                        }
+                                                        className="flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white"
+                                                        aria-label="Удалить"
+                                                    >
+                                                        <TrashIcon />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ) : null}
+                            {kind === 'document' ? (
+                                <div className="flex flex-col gap-3">
+                                    <MediaFileInput
+                                        label="Добавить документы"
+                                        accept="*/*"
+                                        onChange={(files) =>
+                                            onChange({ ...values, documentFiles: [...values.documentFiles, ...files] })
+                                        }
+                                    />
+                                    {values.documentUrls.length || values.documentFiles.length ? (
+                                        <div className="flex flex-col gap-2">
+                                            {values.documentUrls.map((url) => (
+                                                <div
+                                                    key={url}
+                                                    className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                                                >
+                                                    <span className="truncate">{getFileLabel(url)}</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            onChange({
+                                                                ...values,
+                                                                documentUrls: values.documentUrls.filter((item) => item !== url),
+                                                            })
+                                                        }
+                                                        className="flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white"
+                                                        aria-label="Удалить"
+                                                    >
+                                                        <TrashIcon />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                            {values.documentFiles.map((file, index) => (
+                                                <div
+                                                    key={`${file.name}-${file.lastModified}`}
+                                                    className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                                                >
+                                                    <span className="truncate">{file.name}</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            onChange({
+                                                                ...values,
+                                                                documentFiles: values.documentFiles.filter((_, idx) => idx !== index),
+                                                            })
+                                                        }
+                                                        className="flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white"
                                                         aria-label="Удалить"
                                                     >
                                                         <TrashIcon />

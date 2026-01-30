@@ -15,7 +15,10 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputMediaAudio,
+    InputMediaDocument,
     InputMediaPhoto,
+    InputMediaVideo,
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
@@ -186,7 +189,7 @@ def collect_content_targets_with_delay(flow: Flow, source_id: str) -> List[Tuple
             if not target_node:
                 continue
             kind = target_node.get("data", {}).get("kind")
-            if kind in ("message", "image"):
+            if kind in ("message", "image", "video", "audio", "document"):
                 target_id = target_node.get("id") or ""
                 if target_id and target_id not in seen_targets:
                     seen_targets.add(target_id)
@@ -316,7 +319,16 @@ async def upload_images(files: List[UploadFile] = File(...)) -> dict:
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 
-def collect_image_urls(flow: Flow, source_id: str) -> List[str]:
+def collect_media_urls(flow: Flow, source_id: str, kind: str) -> List[str]:
+    field_map = {
+        "image": "imageUrls",
+        "video": "videoUrls",
+        "audio": "audioUrls",
+        "document": "documentUrls",
+    }
+    field = field_map.get(kind)
+    if not field:
+        return []
     nodes_by_id = {node.get("id"): node for node in flow.nodes}
     urls: List[str] = []
     for edge in flow.edges:
@@ -326,16 +338,32 @@ def collect_image_urls(flow: Flow, source_id: str) -> List[str]:
         if not target_node:
             continue
         target_data = target_node.get("data", {})
-        if target_data.get("kind") != "image":
+        if target_data.get("kind") != kind:
             continue
-        image_list = target_data.get("imageUrls") or []
-        for item in image_list:
+        items = target_data.get(field) or []
+        for item in items:
             if isinstance(item, str) and item.strip():
                 urls.append(item.strip())
     return urls
 
 
-def resolve_image_source(url: str):
+def collect_image_urls(flow: Flow, source_id: str) -> List[str]:
+    return collect_media_urls(flow, source_id, "image")
+
+
+def collect_video_urls(flow: Flow, source_id: str) -> List[str]:
+    return collect_media_urls(flow, source_id, "video")
+
+
+def collect_audio_urls(flow: Flow, source_id: str) -> List[str]:
+    return collect_media_urls(flow, source_id, "audio")
+
+
+def collect_document_urls(flow: Flow, source_id: str) -> List[str]:
+    return collect_media_urls(flow, source_id, "document")
+
+
+def resolve_upload_source(url: str):
     if not isinstance(url, str):
         return None
     cleaned = url.strip()
@@ -362,7 +390,7 @@ def resolve_image_source(url: str):
 
 
 async def send_images(message: Message, urls: List[str], caption: str = "", reply_markup=None) -> bool:
-    sources = [resolve_image_source(url) for url in urls]
+    sources = [resolve_upload_source(url) for url in urls]
     sources = [source for source in sources if source]
     if not sources:
         return False
@@ -379,6 +407,60 @@ async def send_images(message: Message, urls: List[str], caption: str = "", repl
     return True
 
 
+async def send_videos(message: Message, urls: List[str], caption: str = "", reply_markup=None) -> bool:
+    sources = [resolve_upload_source(url) for url in urls]
+    sources = [source for source in sources if source]
+    if not sources:
+        return False
+    if len(sources) == 1:
+        await message.answer_video(sources[0], caption=caption or None, reply_markup=reply_markup)
+        return True
+    media = []
+    for idx, source in enumerate(sources):
+        if idx == 0 and caption:
+            media.append(InputMediaVideo(media=source, caption=caption))
+        else:
+            media.append(InputMediaVideo(media=source))
+    await message.answer_media_group(media)
+    return True
+
+
+async def send_audios(message: Message, urls: List[str], caption: str = "", reply_markup=None) -> bool:
+    sources = [resolve_upload_source(url) for url in urls]
+    sources = [source for source in sources if source]
+    if not sources:
+        return False
+    if len(sources) == 1:
+        await message.answer_audio(sources[0], caption=caption or None, reply_markup=reply_markup)
+        return True
+    media = []
+    for idx, source in enumerate(sources):
+        if idx == 0 and caption:
+            media.append(InputMediaAudio(media=source, caption=caption))
+        else:
+            media.append(InputMediaAudio(media=source))
+    await message.answer_media_group(media)
+    return True
+
+
+async def send_documents(message: Message, urls: List[str], caption: str = "", reply_markup=None) -> bool:
+    sources = [resolve_upload_source(url) for url in urls]
+    sources = [source for source in sources if source]
+    if not sources:
+        return False
+    if len(sources) == 1:
+        await message.answer_document(sources[0], caption=caption or None, reply_markup=reply_markup)
+        return True
+    media = []
+    for idx, source in enumerate(sources):
+        if idx == 0 and caption:
+            media.append(InputMediaDocument(media=source, caption=caption))
+        else:
+            media.append(InputMediaDocument(media=source))
+    await message.answer_media_group(media)
+    return True
+
+
 async def send_content_node(flow: Flow, message: Message, target_node: dict) -> None:
     payload = target_node.get("data", {})
     kind = payload.get("kind")
@@ -387,16 +469,54 @@ async def send_content_node(flow: Flow, message: Message, target_node: dict) -> 
         reply_markup = build_reply_markup(flow, target_node.get("id") or "")
         await send_images(message, urls, reply_markup=reply_markup)
         return
+    if kind == "video":
+        urls = payload.get("videoUrls") or []
+        reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+        await send_videos(message, urls, reply_markup=reply_markup)
+        return
+    if kind == "audio":
+        urls = payload.get("audioUrls") or []
+        reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+        await send_audios(message, urls, reply_markup=reply_markup)
+        return
+    if kind == "document":
+        urls = payload.get("documentUrls") or []
+        reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+        await send_documents(message, urls, reply_markup=reply_markup)
+        return
     message_text = (payload.get("messageText") or "").strip()
     image_urls = collect_image_urls(flow, target_node.get("id") or "")
+    video_urls = collect_video_urls(flow, target_node.get("id") or "")
+    audio_urls = collect_audio_urls(flow, target_node.get("id") or "")
+    document_urls = collect_document_urls(flow, target_node.get("id") or "")
     reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+    caption_used = False
+    reply_used = False
     if image_urls:
-        sent = await send_images(message, image_urls, caption=message_text, reply_markup=reply_markup)
-        if message_text and not sent:
-            await message.answer(message_text, reply_markup=reply_markup)
-        elif message_text and len(image_urls) > 1:
-            await message.answer(message_text, reply_markup=reply_markup)
-    else:
+        caption = message_text if message_text and not caption_used else ""
+        await send_images(message, image_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+        if caption:
+            caption_used = True
+            reply_used = True
+    if video_urls:
+        caption = message_text if message_text and not caption_used else ""
+        await send_videos(message, video_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+        if caption:
+            caption_used = True
+            reply_used = True
+    if audio_urls:
+        caption = message_text if message_text and not caption_used else ""
+        await send_audios(message, audio_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+        if caption:
+            caption_used = True
+            reply_used = True
+    if document_urls:
+        caption = message_text if message_text and not caption_used else ""
+        await send_documents(message, document_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+        if caption:
+            caption_used = True
+            reply_used = True
+    if not (image_urls or video_urls or audio_urls or document_urls):
         if message_text:
             await message.answer(message_text, reply_markup=reply_markup)
 

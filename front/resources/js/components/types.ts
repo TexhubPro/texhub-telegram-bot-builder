@@ -6,6 +6,9 @@ export type NodeKind =
     | 'reply_button'
     | 'reply_clear'
     | 'timer'
+    | 'video'
+    | 'audio'
+    | 'document'
     | 'button_row'
     | 'image'
     | 'node';
@@ -21,6 +24,9 @@ export type NodeData = {
     messageText?: string;
     buttonText?: string;
     imageUrls?: string[];
+    videoUrls?: string[];
+    audioUrls?: string[];
+    documentUrls?: string[];
     timerSeconds?: number;
     canAddChild?: boolean;
 };
