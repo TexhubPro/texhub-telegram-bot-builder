@@ -12,7 +12,10 @@ export function ImageFileInput({ label, onChange }: Props) {
                 accept="image/*"
                 multiple
                 className="block w-full text-sm text-slate-700 file:mr-3 file:rounded-md file:border file:border-slate-200 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-slate-600 hover:file:bg-slate-50"
-                onChange={(event) => onChange(Array.from(event.target.files ?? []))}
+                onChange={(event) => {
+                    onChange(Array.from(event.target.files ?? []));
+                    event.target.value = '';
+                }}
             />
         </div>
     );

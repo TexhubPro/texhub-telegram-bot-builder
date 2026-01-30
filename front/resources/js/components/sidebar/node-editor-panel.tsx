@@ -4,6 +4,7 @@ import type { NodeData, NodeKind } from '../types';
 import { FieldInput } from '../ui/field-input';
 import { FieldTextarea } from '../ui/field-textarea';
 import { ImageFileInput } from '../ui/image-file-input';
+import { TrashIcon } from '../ui/icons';
 
 type Values = {
     commandText: string;
@@ -87,36 +88,64 @@ export function NodeEditorPanel({ node, values, onChange, onSave, onClose }: Pro
                                     placeholder="Кнопка"
                                 />
                             ) : null}
-                    {kind === 'image' ? (
-                        <div className="flex flex-col gap-3">
-                            <ImageFileInput
-                                label="Добавить изображения"
-                                onChange={(files) =>
-                                    onChange({ ...values, imageFiles: [...values.imageFiles, ...files] })
-                                }
-                            />
-                            {values.imageUrls.length || values.imageFiles.length ? (
-                                <div className="grid grid-cols-3 gap-2">
-                                    {values.imageUrls.map((url) => (
-                                        <img
-                                            key={url}
-                                            src={url}
-                                            alt="preview"
-                                            className="h-16 w-20 rounded-md object-cover"
-                                        />
-                                    ))}
-                                    {values.imageFiles.map((file) => (
-                                        <img
-                                            key={`${file.name}-${file.lastModified}`}
-                                            src={URL.createObjectURL(file)}
-                                            alt="preview"
-                                            className="h-16 w-20 rounded-md object-cover"
-                                        />
-                                    ))}
+                            {kind === 'image' ? (
+                                <div className="flex flex-col gap-3">
+                                    <ImageFileInput
+                                        label="Добавить изображения"
+                                        onChange={(files) =>
+                                            onChange({ ...values, imageFiles: [...values.imageFiles, ...files] })
+                                        }
+                                    />
+                                    {values.imageUrls.length || values.imageFiles.length ? (
+                                        <div className="grid grid-cols-3 gap-2">
+                                            {values.imageUrls.map((url) => (
+                                                <div key={url} className="relative">
+                                                    <img
+                                                        src={url}
+                                                        alt="preview"
+                                                        className="h-16 w-20 rounded-md object-cover"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            onChange({
+                                                                ...values,
+                                                                imageUrls: values.imageUrls.filter((item) => item !== url),
+                                                            })
+                                                        }
+                                                        className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white shadow-sm"
+                                                        aria-label="Удалить"
+                                                    >
+                                                        <TrashIcon />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                            {values.imageFiles.map((file, index) => (
+                                                <div key={`${file.name}-${file.lastModified}`} className="relative">
+                                                    <img
+                                                        src={URL.createObjectURL(file)}
+                                                        alt="preview"
+                                                        className="h-16 w-20 rounded-md object-cover"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            onChange({
+                                                                ...values,
+                                                                imageFiles: values.imageFiles.filter((_, idx) => idx !== index),
+                                                            })
+                                                        }
+                                                        className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white shadow-sm"
+                                                        aria-label="Удалить"
+                                                    >
+                                                        <TrashIcon />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : null}
                                 </div>
                             ) : null}
-                        </div>
-                    ) : null}
                             <Button color="primary" onPress={onSave}>
                                 Сохранить
                             </Button>

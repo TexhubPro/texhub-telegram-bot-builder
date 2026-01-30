@@ -512,6 +512,10 @@ export default function Welcome() {
             const node = nodes.find((item) => item.id === editorNodeId);
             if (node?.data.kind === 'image') {
                 const uploaded = await uploadImages(editorValues.imageFiles);
+                if (editorValues.imageFiles.length && !uploaded.length) {
+                    window.alert('Не удалось загрузить изображения. Проверь backend и повтори.');
+                    return;
+                }
                 setNodes((nds) =>
                     nds.map((item) => {
                         if (item.id !== editorNodeId) {
