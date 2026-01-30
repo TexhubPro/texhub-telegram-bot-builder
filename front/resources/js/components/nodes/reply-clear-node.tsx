@@ -4,7 +4,7 @@ import type { NodeData } from '../types';
 
 export function ReplyClearNode({ id }: NodeProps<NodeData>) {
     return (
-        <div className="relative rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 shadow-[0_10px_24px_rgba(248,113,113,0.2)]">
+        <div className="group relative rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 shadow-[0_10px_24px_rgba(248,113,113,0.2)]">
             <Handle
                 type="target"
                 position={Position.Left}

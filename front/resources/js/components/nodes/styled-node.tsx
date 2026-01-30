@@ -9,7 +9,7 @@ export function StyledNode({ data, id }: NodeProps<NodeData>) {
     const { onOpenAddMenu } = useContext(AddEdgeMenuContext);
     return (
         <div
-            className="relative rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-800 shadow-[0_10px_30px_rgba(15,23,42,0.08)]"
+            className="group relative rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-800 shadow-[0_10px_30px_rgba(15,23,42,0.08)]"
             style={{ backgroundColor: data.color ?? '#FFFFFF' }}
         >
             <Handle

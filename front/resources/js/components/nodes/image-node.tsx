@@ -6,7 +6,7 @@ export function ImageNode({ data, id }: NodeProps<NodeData>) {
     const count = data.imageUrls?.length ?? 0;
     const label = count === 1 ? '1 изображение' : `${count} изображений`;
     return (
-        <div className="relative rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 shadow-[0_10px_24px_rgba(244,63,94,0.18)]">
+        <div className="group relative rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 shadow-[0_10px_24px_rgba(244,63,94,0.18)]">
             <Handle
                 type="target"
                 position={Position.Left}

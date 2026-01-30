@@ -26,6 +26,7 @@ import { MessageNode } from '../components/nodes/message-node';
 import { ReplyClearNode } from '../components/nodes/reply-clear-node';
 import { ReplyButtonNode } from '../components/nodes/reply-button-node';
 import { StyledNode } from '../components/nodes/styled-node';
+import { TimerNode } from '../components/nodes/timer-node';
 import { NodeEditorPanel } from '../components/sidebar/node-editor-panel';
 import { Sidebar } from '../components/sidebar/sidebar';
 import { DeletableEdge } from '../components/edges/deletable-edge';
@@ -43,6 +44,7 @@ const NODE_KIND_LABELS: Record<NodeKind, string> = {
     message_button: 'Message Button',
     reply_button: 'Reply Button',
     reply_clear: 'Clear Reply',
+    timer: 'Таймер',
     button_row: 'Rows',
     image: 'Изображения',
     node: 'Блок',
@@ -64,6 +66,11 @@ const getNodeTitle = (node: Node<NodeData>) => {
         case 'image': {
             const count = node.data.imageUrls?.length ?? 0;
             return count ? `Изображения (${count})` : 'Изображения';
+        }
+        case 'timer': {
+            const raw = node.data.timerSeconds ?? 0;
+            const seconds = typeof raw === 'number' ? raw : Number(raw) || 0;
+            return `Таймер ${seconds} сек`;
         }
         default:
             return node.data.label;
@@ -87,6 +94,7 @@ const buildEditorValues = (node: Node<NodeData>) => ({
     buttonText: node.data.buttonText ?? '',
     imageUrls: node.data.imageUrls ?? [],
     imageFiles: [] as File[],
+    timerSeconds: node.data.timerSeconds !== undefined ? String(node.data.timerSeconds) : '',
 });
 
 export default function Welcome() {
@@ -104,6 +112,7 @@ export default function Welcome() {
         buttonText: '',
         imageUrls: [] as string[],
         imageFiles: [] as File[],
+        timerSeconds: '',
     });
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const saveTimerRef = useRef<number | null>(null);
@@ -118,6 +127,7 @@ export default function Welcome() {
             message_button: MessageButtonNode,
             reply_button: ReplyButtonNode,
             reply_clear: ReplyClearNode,
+            timer: TimerNode,
             button_row: ButtonRowNode,
             image: ImageNode,
             bot: BotNode,
@@ -253,6 +263,15 @@ export default function Welcome() {
             data: { label: 'Clear Reply', kind: 'reply_clear' },
         });
     }, [addNode, generateId]);
+
+    const handleAddTimerNode = useCallback(() => {
+        addNodeAndEdit({
+            id: generateId('timer'),
+            type: 'timer',
+            position: { x: 520, y: 240 },
+            data: { label: 'Таймер', kind: 'timer', timerSeconds: 5 },
+        });
+    }, [addNodeAndEdit, generateId]);
 
     const handleAddImageNode = useCallback(() => {
         addNodeAndEdit({
@@ -416,6 +435,15 @@ export default function Welcome() {
                 };
             }
 
+            if (templateKey === 'timer') {
+                newNode = {
+                    id: generateId('timer'),
+                    type: 'timer',
+                    position,
+                    data: { label: 'Таймер', kind: 'timer', timerSeconds: 5 },
+                };
+            }
+
             if (templateKey === 'image') {
                 newNode = {
                     id: generateId('image'),
@@ -505,6 +533,11 @@ export default function Welcome() {
                     if (kind === 'message_button' || kind === 'reply_button') {
                         return { ...node, data: { ...node.data, buttonText: editorValues.buttonText } };
                     }
+                    if (kind === 'timer') {
+                        const parsed = Number(editorValues.timerSeconds);
+                        const seconds = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+                        return { ...node, data: { ...node.data, timerSeconds: seconds } };
+                    }
                     return node;
                 })
             );
@@ -568,15 +601,34 @@ export default function Welcome() {
         }
         const commandNodes = nodes.filter((node) => node.data.kind === 'command');
         const nodesById = new Map(nodes.map((node) => [node.id, node]));
-        const connectedCommands = new Set(
-            edges
-                .filter((edge) => {
+        const hasContentTarget = (sourceId: string) => {
+            const visited = new Set<string>();
+            const stack = [sourceId];
+            while (stack.length) {
+                const current = stack.pop();
+                if (!current || visited.has(current)) {
+                    continue;
+                }
+                visited.add(current);
+                for (const edge of edges) {
+                    if (edge.source !== current) {
+                        continue;
+                    }
                     const target = nodesById.get(edge.target);
-                    return target?.data.kind === 'message' || target?.data.kind === 'image';
-                })
-                .map((edge) => edge.source)
-        );
-        const disconnected = commandNodes.filter((node) => !connectedCommands.has(node.id));
+                    if (!target) {
+                        continue;
+                    }
+                    if (target.data.kind === 'message' || target.data.kind === 'image') {
+                        return true;
+                    }
+                    if (target.data.kind === 'timer') {
+                        stack.push(target.id);
+                    }
+                }
+            }
+            return false;
+        };
+        const disconnected = commandNodes.filter((node) => !hasContentTarget(node.id));
         if (disconnected.length) {
             window.alert('Подключи каждую команду к следующей ноде (сообщение или изображения).');
             return;
@@ -734,6 +786,7 @@ export default function Welcome() {
                     node.data.kind === 'message' ||
                     node.data.kind === 'image' ||
                     node.data.kind === 'button_row' ||
+                    node.data.kind === 'timer' ||
                     !sources.has(node.id);
                 if (node.data.canAddChild === canAddChild) {
                     return node;
@@ -761,17 +814,20 @@ export default function Welcome() {
                         node.data.kind === 'reply_button' ||
                         node.data.kind === 'button_row' ||
                         node.data.kind === 'reply_clear' ||
+                        node.data.kind === 'timer' ||
                         node.data.kind === 'image'
                 );
             }
             if (sourceKind === 'message_button' || sourceKind === 'reply_button') {
                 candidates = candidates.filter(
-                    (node) => node.data.kind === 'message' || node.data.kind === 'image'
+                    (node) =>
+                        node.data.kind === 'message' || node.data.kind === 'image' || node.data.kind === 'timer'
                 );
             }
             if (sourceKind === 'command') {
                 candidates = candidates.filter(
-                    (node) => node.data.kind === 'message' || node.data.kind === 'image'
+                    (node) =>
+                        node.data.kind === 'message' || node.data.kind === 'image' || node.data.kind === 'timer'
                 );
             }
             if (sourceKind === 'image') {
@@ -780,7 +836,13 @@ export default function Welcome() {
                         node.data.kind === 'message_button' ||
                         node.data.kind === 'reply_button' ||
                         node.data.kind === 'button_row' ||
-                        node.data.kind === 'reply_clear'
+                        node.data.kind === 'reply_clear' ||
+                        node.data.kind === 'timer'
+                );
+            }
+            if (sourceKind === 'timer') {
+                candidates = candidates.filter(
+                    (node) => node.data.kind === 'message' || node.data.kind === 'image'
                 );
             }
             if (sourceKind === 'button_row') {
@@ -809,6 +871,7 @@ export default function Welcome() {
             { key: 'message_button', label: 'Message Button', description: 'Инлайн кнопка' },
             { key: 'reply_button', label: 'Reply Button', description: 'Ответная кнопка' },
             { key: 'reply_clear', label: 'Clear Reply', description: 'Очистить reply-кнопки' },
+            { key: 'timer', label: 'Таймер', description: 'Задержка перед сообщением' },
             { key: 'image', label: 'Изображения', description: 'Один или больше файлов' },
         ],
         []
@@ -825,14 +888,19 @@ export default function Welcome() {
                     item.key === 'reply_button' ||
                     item.key === 'button_row' ||
                     item.key === 'reply_clear' ||
+                    item.key === 'timer' ||
                     item.key === 'image'
             );
         }
         if (sourceKind === 'command') {
-            templates = createTemplates.filter((item) => item.key === 'message' || item.key === 'image');
+            templates = createTemplates.filter(
+                (item) => item.key === 'message' || item.key === 'image' || item.key === 'timer'
+            );
         }
         if (sourceKind === 'message_button' || sourceKind === 'reply_button') {
-            templates = createTemplates.filter((item) => item.key === 'message' || item.key === 'image');
+            templates = createTemplates.filter(
+                (item) => item.key === 'message' || item.key === 'image' || item.key === 'timer'
+            );
         }
         if (sourceKind === 'image') {
             templates = createTemplates.filter(
@@ -840,8 +908,12 @@ export default function Welcome() {
                     item.key === 'message_button' ||
                     item.key === 'reply_button' ||
                     item.key === 'button_row' ||
-                    item.key === 'reply_clear'
+                    item.key === 'reply_clear' ||
+                    item.key === 'timer'
             );
+        }
+        if (sourceKind === 'timer') {
+            templates = createTemplates.filter((item) => item.key === 'message' || item.key === 'image');
         }
         if (sourceKind === 'button_row') {
             templates = createTemplates.filter(
@@ -863,6 +935,7 @@ export default function Welcome() {
             { key: 'message_button', label: 'Message Button', description: 'Инлайн кнопка', action: handleAddMessageButtonNode },
             { key: 'reply_button', label: 'Reply Button', description: 'Ответная кнопка', action: handleAddReplyButtonNode },
             { key: 'reply_clear', label: 'Clear Reply', description: 'Очистить reply-кнопки', action: handleAddReplyClearNode },
+            { key: 'timer', label: 'Таймер', description: 'Задержка перед сообщением', action: handleAddTimerNode },
             { key: 'image', label: 'Изображения', description: 'Один или больше файлов', action: handleAddImageNode },
             { key: 'bot', label: 'Бот', description: 'Токен и статус', action: handleAddBot },
         ],
@@ -874,6 +947,7 @@ export default function Welcome() {
             handleAddMessageButtonNode,
             handleAddReplyButtonNode,
             handleAddReplyClearNode,
+            handleAddTimerNode,
             handleAddImageNode,
         ]
     );

@@ -4,7 +4,7 @@ import type { NodeData } from '../types';
 
 export function MessageButtonNode({ data, id }: NodeProps<NodeData>) {
     return (
-        <div className="relative rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 shadow-[0_10px_24px_rgba(14,165,233,0.18)]">
+        <div className="group relative rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 shadow-[0_10px_24px_rgba(14,165,233,0.18)]">
             <Handle
                 type="target"
                 position={Position.Left}

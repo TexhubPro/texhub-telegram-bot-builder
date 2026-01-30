@@ -129,34 +129,6 @@ def update_bot_row(bot: Bot) -> None:
         conn.commit()
 
 
-def extract_command_routes(flow: Flow) -> List[Tuple[str, str]]:
-    nodes_by_id = {node.get("id"): node for node in flow.nodes}
-    routes: List[Tuple[str, str]] = []
-    for node in flow.nodes:
-        data = node.get("data", {})
-        if data.get("kind") != "command":
-            continue
-        command_text = (data.get("commandText") or "/start").strip()
-        if not command_text:
-            continue
-        command = command_text.lstrip("/").strip().lower()
-        if not command:
-            continue
-        target_node = None
-        for edge in flow.edges:
-            if edge.get("source") == node.get("id"):
-                candidate = nodes_by_id.get(edge.get("target"))
-                if not candidate:
-                    continue
-                candidate_kind = candidate.get("data", {}).get("kind")
-                if candidate_kind in ("message", "image"):
-                    target_node = candidate
-                    break
-        if target_node:
-            routes.append((command, target_node.get("id") or ""))
-    return routes
-
-
 def normalize_command(text: str) -> str:
     cleaned = text.strip()
     if not cleaned.startswith("/"):
@@ -169,28 +141,60 @@ def normalize_command(text: str) -> str:
     return value.lower()
 
 
-def find_target_node_for_command(flow: Flow, command: str) -> Optional[dict]:
+def find_command_node(flow: Flow, command: str) -> Optional[dict]:
     command_lower = command.lower()
-    routes = extract_command_routes(flow)
-    nodes_by_id = {node.get("id"): node for node in flow.nodes}
-    for cmd, message_id in routes:
-        if cmd == command_lower:
-            return nodes_by_id.get(message_id)
+    for node in flow.nodes:
+        data = node.get("data", {})
+        if data.get("kind") != "command":
+            continue
+        command_text = (data.get("commandText") or "/start").strip()
+        if not command_text:
+            continue
+        normalized = command_text.lstrip("/").strip().lower()
+        if not normalized:
+            continue
+        if normalized == command_lower:
+            return node
     return None
 
 
-def find_content_target_from_source(flow: Flow, source_id: str) -> Optional[dict]:
+def parse_timer_seconds(node: dict) -> float:
+    data = node.get("data", {})
+    raw = data.get("timerSeconds") or 0
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        value = 0.0
+    return max(0.0, value)
+
+
+def collect_content_targets_with_delay(flow: Flow, source_id: str) -> List[Tuple[dict, float]]:
     nodes_by_id = {node.get("id"): node for node in flow.nodes}
-    for edge in flow.edges:
-        if edge.get("source") != source_id:
+    results: List[Tuple[dict, float]] = []
+    seen_targets: set[str] = set()
+    visited: set[str] = set()
+    queue: List[Tuple[str, float]] = [(source_id, 0.0)]
+    while queue:
+        current_id, delay = queue.pop(0)
+        if not current_id or current_id in visited:
             continue
-        target_node = nodes_by_id.get(edge.get("target"))
-        if not target_node:
-            continue
-        target_data = target_node.get("data", {})
-        if target_data.get("kind") in ("message", "image"):
-            return target_node
-    return None
+        visited.add(current_id)
+        for edge in flow.edges:
+            if edge.get("source") != current_id:
+                continue
+            target_node = nodes_by_id.get(edge.get("target"))
+            if not target_node:
+                continue
+            kind = target_node.get("data", {}).get("kind")
+            if kind in ("message", "image"):
+                target_id = target_node.get("id") or ""
+                if target_id and target_id not in seen_targets:
+                    seen_targets.add(target_id)
+                    results.append((target_node, delay))
+            elif kind == "timer":
+                next_delay = delay + parse_timer_seconds(target_node)
+                queue.append((target_node.get("id") or "", next_delay))
+    return results
 
 
 def find_reply_button_by_text(flow: Flow, text: str) -> Optional[dict]:
@@ -375,6 +379,41 @@ async def send_images(message: Message, urls: List[str], caption: str = "", repl
     return True
 
 
+async def send_content_node(flow: Flow, message: Message, target_node: dict) -> None:
+    payload = target_node.get("data", {})
+    kind = payload.get("kind")
+    if kind == "image":
+        urls = payload.get("imageUrls") or []
+        reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+        await send_images(message, urls, reply_markup=reply_markup)
+        return
+    message_text = (payload.get("messageText") or "").strip()
+    image_urls = collect_image_urls(flow, target_node.get("id") or "")
+    reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+    if image_urls:
+        sent = await send_images(message, image_urls, caption=message_text, reply_markup=reply_markup)
+        if message_text and not sent:
+            await message.answer(message_text, reply_markup=reply_markup)
+        elif message_text and len(image_urls) > 1:
+            await message.answer(message_text, reply_markup=reply_markup)
+    else:
+        if message_text:
+            await message.answer(message_text, reply_markup=reply_markup)
+
+
+async def send_targets_with_delay(flow: Flow, message: Message, targets: List[Tuple[dict, float]]) -> None:
+    if not targets:
+        return
+    ordered = sorted(targets, key=lambda item: item[1])
+    elapsed = 0.0
+    for target_node, delay in ordered:
+        wait_time = delay - elapsed
+        if wait_time > 0:
+            await asyncio.sleep(wait_time)
+            elapsed = delay
+        await send_content_node(flow, message, target_node)
+
+
 async def run_bot_polling(bot: Bot) -> None:
     if not bot.token:
         return
@@ -385,51 +424,15 @@ async def run_bot_polling(bot: Bot) -> None:
         command = normalize_command(message.text)
         flow = FLOW_CACHE.get(bot.id) or bot.flow
         if command:
-            target_node = find_target_node_for_command(flow, command)
-            if target_node:
-                data = target_node.get("data", {})
-                kind = data.get("kind")
-                if kind == "image":
-                    urls = data.get("imageUrls") or []
-                    reply_markup = build_reply_markup(flow, target_node.get("id") or "")
-                    await send_images(message, urls, reply_markup=reply_markup)
-                    return
-                message_text = (data.get("messageText") or "").strip()
-                image_urls = collect_image_urls(flow, target_node.get("id") or "")
-                reply_markup = build_reply_markup(flow, target_node.get("id") or "")
-                if image_urls:
-                    sent = await send_images(message, image_urls, caption=message_text, reply_markup=reply_markup)
-                    if message_text and not sent:
-                        await message.answer(message_text, reply_markup=reply_markup)
-                    elif message_text and len(image_urls) > 1:
-                        await message.answer(message_text, reply_markup=reply_markup)
-                else:
-                    if message_text:
-                        await message.answer(message_text, reply_markup=reply_markup)
+            command_node = find_command_node(flow, command)
+            if command_node:
+                targets = collect_content_targets_with_delay(flow, command_node.get("id") or "")
+                await send_targets_with_delay(flow, message, targets)
             return
         reply_button = find_reply_button_by_text(flow, message.text)
         if reply_button:
-            target_node = find_content_target_from_source(flow, reply_button.get("id") or "")
-            if target_node:
-                payload = target_node.get("data", {})
-                kind = payload.get("kind")
-                if kind == "image":
-                    urls = payload.get("imageUrls") or []
-                    reply_markup = build_reply_markup(flow, target_node.get("id") or "")
-                    await send_images(message, urls, reply_markup=reply_markup)
-                    return
-                message_text = (payload.get("messageText") or "").strip()
-                image_urls = collect_image_urls(flow, target_node.get("id") or "")
-                reply_markup = build_reply_markup(flow, target_node.get("id") or "")
-                if image_urls:
-                    sent = await send_images(message, image_urls, caption=message_text, reply_markup=reply_markup)
-                    if message_text and not sent:
-                        await message.answer(message_text, reply_markup=reply_markup)
-                    elif message_text and len(image_urls) > 1:
-                        await message.answer(message_text, reply_markup=reply_markup)
-                else:
-                    if message_text:
-                        await message.answer(message_text, reply_markup=reply_markup)
+            targets = collect_content_targets_with_delay(flow, reply_button.get("id") or "")
+            await send_targets_with_delay(flow, message, targets)
 
     dispatcher.message()(handler)
 
@@ -443,54 +446,18 @@ async def run_bot_polling(bot: Bot) -> None:
         flow = FLOW_CACHE.get(bot.id) or bot.flow
         if data.startswith("btn:"):
             button_id = data[4:]
-            target_node = find_content_target_from_source(flow, button_id)
-            if target_node:
-                payload = target_node.get("data", {})
-                kind = payload.get("kind")
-                if kind == "image":
-                    urls = payload.get("imageUrls") or []
-                    reply_markup = build_reply_markup(flow, target_node.get("id") or "")
-                    await send_images(query.message, urls, reply_markup=reply_markup)
-                    return
-                message_text = (payload.get("messageText") or "").strip()
-                image_urls = collect_image_urls(flow, target_node.get("id") or "")
-                reply_markup = build_reply_markup(flow, target_node.get("id") or "")
-                if image_urls:
-                    sent = await send_images(query.message, image_urls, caption=message_text, reply_markup=reply_markup)
-                    if message_text and not sent:
-                        await query.message.answer(message_text, reply_markup=reply_markup)
-                    elif message_text and len(image_urls) > 1:
-                        await query.message.answer(message_text, reply_markup=reply_markup)
-                else:
-                    if message_text:
-                        await query.message.answer(message_text, reply_markup=reply_markup)
-                return
+            targets = collect_content_targets_with_delay(flow, button_id)
+            await send_targets_with_delay(flow, query.message, targets)
+            return
         if data.startswith("/"):
             flow = FLOW_CACHE.get(bot.id) or bot.flow
             command = normalize_command(data)
             if command:
-                target_node = find_target_node_for_command(flow, command)
-                if target_node:
-                    payload = target_node.get("data", {})
-                    kind = payload.get("kind")
-                    if kind == "image":
-                        urls = payload.get("imageUrls") or []
-                        reply_markup = build_reply_markup(flow, target_node.get("id") or "")
-                        await send_images(query.message, urls, reply_markup=reply_markup)
-                        return
-                    message_text = (payload.get("messageText") or "").strip()
-                    image_urls = collect_image_urls(flow, target_node.get("id") or "")
-                    reply_markup = build_reply_markup(flow, target_node.get("id") or "")
-                    if image_urls:
-                        sent = await send_images(query.message, image_urls, caption=message_text, reply_markup=reply_markup)
-                        if message_text and not sent:
-                            await query.message.answer(message_text, reply_markup=reply_markup)
-                        elif message_text and len(image_urls) > 1:
-                            await query.message.answer(message_text, reply_markup=reply_markup)
-                    else:
-                        if message_text:
-                            await query.message.answer(message_text, reply_markup=reply_markup)
-                    return
+                command_node = find_command_node(flow, command)
+                if command_node:
+                    targets = collect_content_targets_with_delay(flow, command_node.get("id") or "")
+                    await send_targets_with_delay(flow, query.message, targets)
+                return
         await query.message.answer(data)
 
     dispatcher.callback_query()(callback_handler)

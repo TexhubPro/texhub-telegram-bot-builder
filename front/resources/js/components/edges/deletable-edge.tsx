@@ -1,10 +1,11 @@
-import { useContext } from 'react';
+import { useContext, useState } from 'react';
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from 'reactflow';
 import { GraphActionsContext } from '../nodes/graph-actions-context';
 import { TrashIcon } from '../ui/icons';
 
 export function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd }: EdgeProps) {
     const { onDeleteEdge } = useContext(GraphActionsContext);
+    const [isHovered, setIsHovered] = useState(false);
     const [edgePath, labelX, labelY] = getBezierPath({
         sourceX,
         sourceY,
@@ -17,14 +18,27 @@ export function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePo
     return (
         <>
             <BaseEdge path={edgePath} style={style} markerEnd={markerEnd} />
+            <path
+                d={edgePath}
+                fill="none"
+                stroke="transparent"
+                strokeWidth={18}
+                onMouseEnter={() => setIsHovered(true)}
+                onMouseLeave={() => setIsHovered(false)}
+                style={{ pointerEvents: 'stroke' }}
+            />
             <EdgeLabelRenderer>
                 <div
                     className="nodrag nopan absolute"
                     style={{
                         transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-                        pointerEvents: 'all',
+                        pointerEvents: isHovered ? 'all' : 'none',
                         zIndex: 10,
+                        opacity: isHovered ? 1 : 0,
+                        transition: 'opacity 150ms ease',
                     }}
+                    onMouseEnter={() => setIsHovered(true)}
+                    onMouseLeave={() => setIsHovered(false)}
                 >
                     <button
                         type="button"

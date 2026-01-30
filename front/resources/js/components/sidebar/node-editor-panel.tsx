@@ -12,6 +12,7 @@ type Values = {
     buttonText: string;
     imageUrls: string[];
     imageFiles: File[];
+    timerSeconds: string;
 };
 
 type Props = {
@@ -32,6 +33,8 @@ const getTitle = (kind?: NodeKind) => {
             return 'Message Button';
         case 'reply_button':
             return 'Reply Button';
+        case 'timer':
+            return 'Таймер';
         case 'image':
             return 'Изображения';
         default:
@@ -86,6 +89,17 @@ export function NodeEditorPanel({ node, values, onChange, onSave, onClose }: Pro
                                     value={values.buttonText}
                                     onChange={(value) => onChange({ ...values, buttonText: value })}
                                     placeholder="Кнопка"
+                                />
+                            ) : null}
+                            {kind === 'timer' ? (
+                                <FieldInput
+                                    label="Задержка (сек)"
+                                    value={values.timerSeconds}
+                                    onChange={(value) => onChange({ ...values, timerSeconds: value })}
+                                    placeholder="5"
+                                    type="number"
+                                    min="0"
+                                    step="1"
                                 />
                             ) : null}
                             {kind === 'image' ? (

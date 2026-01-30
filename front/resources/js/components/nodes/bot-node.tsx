@@ -12,7 +12,7 @@ export function BotNode({ data, id }: NodeProps<NodeData>) {
     const { onStart, onStop } = useContext(BotActionsContext);
     const { onOpenAddMenu } = useContext(AddEdgeMenuContext);
     return (
-        <div className="relative rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 shadow-[0_12px_30px_rgba(16,185,129,0.2)]">
+        <div className="group relative rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 shadow-[0_12px_30px_rgba(16,185,129,0.2)]">
             <NodeActionButtons nodeId={id} canEdit={false} />
             <div className="flex min-w-[180px] items-start justify-between gap-3">
                 <div>

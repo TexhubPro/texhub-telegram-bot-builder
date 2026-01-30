@@ -5,17 +5,31 @@ import { NodeActionButtons } from './node-action-buttons';
 import type { NodeData } from '../types';
 import { PlusIcon } from '../ui/icons';
 
-export function CommandNode({ data, id }: NodeProps<NodeData>) {
+const resolveSeconds = (value?: number | string) => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+    }
+    if (typeof value === 'string') {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
+    return 0;
+};
+
+export function TimerNode({ data, id }: NodeProps<NodeData>) {
     const { onOpenAddMenu } = useContext(AddEdgeMenuContext);
+    const seconds = resolveSeconds(data.timerSeconds);
     return (
-        <div className="group relative rounded-lg border-2 border-purple-600 bg-purple-500 text-white">
-            <Handle type="target" position={Position.Left} style={{ width: 14, height: 14, borderWidth: 2, background: '#4338ca' }} />
+        <div className="group relative rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900 shadow-[0_10px_24px_rgba(99,102,241,0.18)]">
+            <Handle type="target" position={Position.Left} style={{ width: 12, height: 12, borderWidth: 2, background: '#4f46e5' }} />
             <NodeActionButtons nodeId={id} canEdit />
-            <div className="min-w-[150px]">
-                <div className="rounded-t-md bg-white px-3 py-0.5 text-xs font-semibold tracking-wide text-purple-500 uppercase">Команда</div>
-                <div className="px-3 py-1 text-sm font-semibold">{data.commandText ?? '/start'}</div>
+            <div className="max-w-96 min-w-fit">
+                <div className="text-xs font-semibold tracking-wide text-indigo-600 uppercase">Таймер</div>
+                <div className="text-sm font-semibold">{seconds} сек</div>
             </div>
-            <Handle type="source" position={Position.Right} style={{ width: 14, height: 14, borderWidth: 2, background: '#4338ca' }} />
+            <Handle type="source" position={Position.Right} style={{ width: 12, height: 12, borderWidth: 2, background: '#4f46e5' }} />
             {data.canAddChild ? (
                 <button
                     type="button"

@@ -5,6 +5,7 @@ export type NodeKind =
     | 'message_button'
     | 'reply_button'
     | 'reply_clear'
+    | 'timer'
     | 'button_row'
     | 'image'
     | 'node';
@@ -20,6 +21,7 @@ export type NodeData = {
     messageText?: string;
     buttonText?: string;
     imageUrls?: string[];
+    timerSeconds?: number;
     canAddChild?: boolean;
 };
 

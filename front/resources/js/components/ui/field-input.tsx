@@ -5,9 +5,12 @@ type Props = {
     value: string;
     onChange: (value: string) => void;
     placeholder?: string;
+    type?: string;
+    min?: string;
+    step?: string;
 };
 
-export function FieldInput({ label, value, onChange, placeholder }: Props) {
+export function FieldInput({ label, value, onChange, placeholder, type, min, step }: Props) {
     return (
         <div className="flex flex-col gap-2">
             <label className="block text-xs font-semibold text-slate-600">{label}</label>
@@ -16,6 +19,9 @@ export function FieldInput({ label, value, onChange, placeholder }: Props) {
                 value={value}
                 onValueChange={onChange}
                 placeholder={placeholder}
+                type={type}
+                min={min}
+                step={step}
                 variant="bordered"
                 size="sm"
                 classNames={{ inputWrapper: 'mt-0.5' }}

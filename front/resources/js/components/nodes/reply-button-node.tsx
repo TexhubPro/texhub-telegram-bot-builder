@@ -4,7 +4,7 @@ import type { NodeData } from '../types';
 
 export function ReplyButtonNode({ data, id }: NodeProps<NodeData>) {
     return (
-        <div className="relative rounded-lg border border-lime-200 bg-lime-50 px-4 py-3 text-sm text-lime-900 shadow-[0_10px_24px_rgba(132,204,22,0.2)]">
+        <div className="group relative rounded-lg border border-lime-200 bg-lime-50 px-4 py-3 text-sm text-lime-900 shadow-[0_10px_24px_rgba(132,204,22,0.2)]">
             <Handle
                 type="target"
                 position={Position.Left}
