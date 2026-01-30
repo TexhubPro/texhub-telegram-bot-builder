@@ -1,11 +1,13 @@
 ﻿from __future__ import annotations
 
 import asyncio
+import csv
 import json
 import os
 import re
 import sqlite3
 import uuid
+from io import BytesIO
 from datetime import datetime, time as time_value
 from urllib.parse import urlparse
 from typing import Dict, List, Optional, Tuple
@@ -30,6 +32,7 @@ from aiogram.types import (
     FSInputFile,
 )
 from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -46,7 +49,12 @@ app.add_middleware(
 
 DB_PATH = os.getenv("BOT_DB", "bot_builder.db")
 UPLOAD_DIR = os.getenv("BOT_UPLOADS", "uploads")
+FILES_DIR = os.getenv("BOT_FILES", "files")
+EXCEL_DIR = os.path.join(FILES_DIR, "excel")
+TEXT_DIR = os.path.join(FILES_DIR, "text")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(EXCEL_DIR, exist_ok=True)
+os.makedirs(TEXT_DIR, exist_ok=True)
 
 
 class Flow(BaseModel):
@@ -420,11 +428,28 @@ def normalize_command(text: str) -> str:
     return value.lower()
 
 
+def sanitize_filename(value: str, fallback: str = "data") -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "_", (value or "").strip())
+    cleaned = cleaned.strip("_")
+    return cleaned or fallback
+
+
+def get_excel_path(bot_id: str, name: str) -> str:
+    filename = f"{sanitize_filename(name)}.csv"
+    return os.path.join(EXCEL_DIR, f"{sanitize_filename(bot_id)}__{filename}")
+
+
+def get_text_path(bot_id: str, name: str) -> str:
+    filename = f"{sanitize_filename(name)}.txt"
+    return os.path.join(TEXT_DIR, f"{sanitize_filename(bot_id)}__{filename}")
+
+
 def render_template(
     text: str,
     message: Message,
     user: Optional[object] = None,
     chat_id_override: Optional[int] = None,
+    row_data: Optional[dict] = None,
 ) -> str:
     if not text:
         return ""
@@ -447,6 +472,12 @@ def render_template(
     result = text
     for key, value in replacements.items():
         result = result.replace(key, value)
+    if row_data:
+        lower_map = {str(key).lower(): str(value) for key, value in row_data.items() if value is not None}
+        def replace_row(match: re.Match) -> str:
+            key = match.group(1).strip().lower()
+            return lower_map.get(key, "")
+        result = re.sub(r"\{row\[([^\]]+)\]\}", replace_row, result)
     return result
 
 
@@ -578,28 +609,142 @@ def match_condition(message: Message, node: dict, bot_id: Optional[str] = None, 
     return all(checks)
 
 
+def extract_record_value(message: Message, record_field: str) -> str:
+    field = (record_field or "").strip()
+    if field == "text":
+        return (message.text or message.caption or "").strip()
+    if field == "name":
+        return getattr(message.from_user, "first_name", "") if message.from_user else ""
+    if field == "first_name":
+        return getattr(message.from_user, "first_name", "") if message.from_user else ""
+    if field == "last_name":
+        return getattr(message.from_user, "last_name", "") if message.from_user else ""
+    if field == "username":
+        username = getattr(message.from_user, "username", "") if message.from_user else ""
+        return f"@{username}" if username else ""
+    if field == "full_name":
+        first = getattr(message.from_user, "first_name", "") if message.from_user else ""
+        last = getattr(message.from_user, "last_name", "") if message.from_user else ""
+        return " ".join(part for part in [first, last] if part)
+    if field == "chat_id":
+        return str(message.chat.id) if message.chat else ""
+    if field == "photo_id":
+        if message.photo:
+            return message.photo[-1].file_id
+        return ""
+    if field == "video_id":
+        return message.video.file_id if message.video else ""
+    if field == "audio_id":
+        return message.audio.file_id if message.audio else ""
+    if field == "document_id":
+        return message.document.file_id if message.document else ""
+    return ""
+
+
+def extract_record_value_from_entry(entry: dict, record_field: str) -> str:
+    field = (record_field or "").strip()
+    if field == "name":
+        return entry.get("first_name", "") or ""
+    if field == "first_name":
+        return entry.get("first_name", "") or ""
+    if field == "last_name":
+        return entry.get("last_name", "") or ""
+    if field == "username":
+        username = entry.get("username") or ""
+        return f"@{username}" if username else ""
+    if field == "full_name":
+        first = entry.get("first_name") or ""
+        last = entry.get("last_name") or ""
+        return " ".join(part for part in [first, last] if part)
+    if field == "chat_id":
+        return str(entry.get("id", ""))
+    return ""
+
+
+def append_to_text_file(bot_id: str, file_name: str, value: str) -> None:
+    path = get_text_path(bot_id, file_name)
+    line = (value or "").strip()
+    if not line:
+        return
+    with open(path, "a", encoding="utf-8") as file_obj:
+        file_obj.write(line + "\n")
+
+
+def append_to_excel_file(bot_id: str, file_name: str, column: str, value: str) -> None:
+    path = get_excel_path(bot_id, file_name)
+    column = (column or "").strip() or "Value"
+    value = (value or "").strip()
+    rows: List[dict] = []
+    headers: List[str] = []
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as file_obj:
+            reader = csv.DictReader(file_obj)
+            headers = reader.fieldnames or []
+            rows = list(reader)
+    if column not in headers:
+        headers.append(column)
+    new_row = {header: "" for header in headers}
+    new_row[column] = value
+    rows.append(new_row)
+    with open(path, "w", encoding="utf-8", newline="") as file_obj:
+        writer = csv.DictWriter(file_obj, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def resolve_excel_file_info(flow: Flow, nodes_by_id: dict, column_id: str) -> Optional[dict]:
+    for edge in flow.edges:
+        if edge.get("target") != column_id:
+            continue
+        source_node = nodes_by_id.get(edge.get("source"))
+        if not source_node:
+            continue
+        if source_node.get("data", {}).get("kind") != "excel_file":
+            continue
+        file_name = source_node.get("data", {}).get("fileName") or "data"
+        return {"type": "excel", "name": file_name}
+    return None
+
+
 async def collect_content_targets_with_delay(
     flow: Flow,
     source_id: str,
     message: Message | None = None,
     bot_id: Optional[str] = None,
     user_id: Optional[int] = None,
-) -> List[Tuple[dict, float, Optional[int]]]:
+) -> List[Tuple[dict, float, Optional[int], Optional[dict]]]:
     nodes_by_id = {node.get("id"): node for node in flow.nodes}
-    results: List[Tuple[dict, float, Optional[int]]] = []
+    results: List[Tuple[dict, float, Optional[int], Optional[dict]]] = []
     seen_targets: set[tuple[str, Optional[int]]] = set()
     visited: set[tuple[str, Optional[int]]] = set()
-    queue: List[Tuple[str, float, Optional[int]]] = [(source_id, 0.0, None)]
+    queue: List[Tuple[str, float, Optional[int], Optional[str], Optional[dict], Optional[str], Optional[dict]]] = [
+        (source_id, 0.0, None, None, None, None, None)
+    ]
     effective_user_id = user_id
     if effective_user_id is None and message and message.from_user:
         effective_user_id = message.from_user.id
     while queue:
-        current_id, delay, target_chat_id = queue.pop(0)
+        current_id, delay, target_chat_id, record_value, file_info, column_name, row_data = queue.pop(0)
         if not current_id or (current_id, target_chat_id) in visited:
             continue
         visited.add((current_id, target_chat_id))
         current_node = nodes_by_id.get(current_id)
         current_kind = current_node.get("data", {}).get("kind") if current_node else None
+        if current_kind == "record" and message:
+            record_field = current_node.get("data", {}).get("recordField") or ""
+            record_value = extract_record_value(message, record_field)
+        if current_kind in ("excel_file", "text_file") and current_node:
+            file_name = current_node.get("data", {}).get("fileName") or "data"
+            file_type = "excel" if current_kind == "excel_file" else "text"
+            file_info = {"type": file_type, "name": file_name}
+            if file_type == "text" and record_value is not None and bot_id:
+                append_to_text_file(bot_id, file_name, record_value)
+        if current_kind == "excel_column" and current_node:
+            column_name = current_node.get("data", {}).get("columnName") or "Value"
+            if file_info is None:
+                file_info = resolve_excel_file_info(flow, nodes_by_id, current_id)
+            if file_info and file_info.get("type") == "excel" and bot_id:
+                append_to_excel_file(bot_id, file_info.get("name") or "data", column_name, record_value or "")
         if current_kind == "chat" and current_node:
             override_chat_id = parse_chat_id(current_node)
             if override_chat_id is not None:
@@ -612,12 +757,122 @@ async def collect_content_targets_with_delay(
             chat_id = parse_subscription_chat_id(current_node)
             if chat_id is not None:
                 subscription_pass = await is_user_subscribed(message.bot, chat_id, effective_user_id)
+        search_pass = None
+        if current_kind == "file_search":
+            search_pass = False
+            row_data = None
+            payload = current_node.get("data", {})
+            search_source = (payload.get("searchSource") or "incoming").strip()
+            manual_value = (payload.get("searchValue") or "").strip()
+            search_value = ""
+            if search_source == "manual" and manual_value:
+                if message:
+                    search_value = render_template(manual_value, message, message.from_user)
+                else:
+                    search_value = manual_value
+            else:
+                search_value = (record_value or "").strip()
+                if not search_value and message:
+                    search_value = (message.text or message.caption or "").strip()
+            search_column = (payload.get("searchColumnName") or "").strip()
+            resolved_file_info = file_info
+            resolved_column = search_column or column_name or ""
+            for edge in flow.edges:
+                if edge.get("target") != current_id:
+                    continue
+                source_node = nodes_by_id.get(edge.get("source"))
+                if not source_node:
+                    continue
+                source_kind = source_node.get("data", {}).get("kind")
+                if source_kind == "text_file":
+                    if resolved_file_info is None:
+                        file_name = source_node.get("data", {}).get("fileName") or "data"
+                        resolved_file_info = {"type": "text", "name": file_name}
+                elif source_kind == "excel_column":
+                    if not search_column:
+                        resolved_column = (source_node.get("data", {}).get("columnName") or "").strip() or resolved_column
+                    if resolved_file_info is None:
+                        resolved_file_info = resolve_excel_file_info(flow, nodes_by_id, source_node.get("id") or "")
+                elif source_kind == "excel_file":
+                    if resolved_file_info is None:
+                        file_name = source_node.get("data", {}).get("fileName") or "data"
+                        resolved_file_info = {"type": "excel", "name": file_name}
+            for edge in flow.edges:
+                if edge.get("source") != current_id:
+                    continue
+                target_node = nodes_by_id.get(edge.get("target"))
+                if not target_node or target_node.get("data", {}).get("kind") != "excel_column":
+                    continue
+                if not search_column:
+                    resolved_column = (target_node.get("data", {}).get("columnName") or "").strip() or resolved_column
+                if resolved_file_info is None:
+                    resolved_file_info = resolve_excel_file_info(flow, nodes_by_id, target_node.get("id") or "")
+                if resolved_column and resolved_file_info:
+                    break
+            if not resolved_column or resolved_file_info is None:
+                for edge in flow.edges:
+                    if edge.get("target") != current_id:
+                        continue
+                    source_node = nodes_by_id.get(edge.get("source"))
+                    if not source_node or source_node.get("data", {}).get("kind") != "excel_column":
+                        continue
+                    if not search_column:
+                        resolved_column = (source_node.get("data", {}).get("columnName") or "").strip() or resolved_column
+                    if resolved_file_info is None:
+                        resolved_file_info = resolve_excel_file_info(flow, nodes_by_id, source_node.get("id") or "")
+                    if resolved_column and resolved_file_info:
+                        break
+            if not resolved_column or resolved_file_info is None:
+                for edge in flow.edges:
+                    if edge.get("target") != current_id:
+                        continue
+                    source_node = nodes_by_id.get(edge.get("source"))
+                    if not source_node or source_node.get("data", {}).get("kind") != "excel_column":
+                        continue
+                    if not search_column:
+                        resolved_column = (source_node.get("data", {}).get("columnName") or "").strip() or resolved_column
+                    if resolved_file_info is None:
+                        resolved_file_info = resolve_excel_file_info(flow, nodes_by_id, source_node.get("id") or "")
+                    if resolved_column and resolved_file_info:
+                        break
+            if resolved_file_info and search_value:
+                if resolved_file_info.get("type") == "excel" and resolved_column and bot_id:
+                    path = get_excel_path(bot_id, resolved_file_info.get("name") or "data")
+                    if os.path.exists(path):
+                        with open(path, "r", encoding="utf-8") as file_obj:
+                            reader = csv.DictReader(file_obj)
+                            for row in reader:
+                                cell_value = (row.get(resolved_column) or "").strip()
+                                if cell_value.lower() == search_value.lower():
+                                    row_data = row
+                                    search_pass = True
+                                    break
+                if resolved_file_info.get("type") == "text" and bot_id:
+                    path = get_text_path(bot_id, resolved_file_info.get("name") or "data")
+                    if os.path.exists(path):
+                        with open(path, "r", encoding="utf-8") as file_obj:
+                            for line in file_obj:
+                                if line.strip().lower() == search_value.lower():
+                                    row_data = {"value": line.strip()}
+                                    search_pass = True
+                                    break
+            file_info = resolved_file_info or file_info
+            column_name = resolved_column or column_name
         for edge in flow.edges:
             if edge.get("source") != current_id:
                 continue
-            if current_kind in ("condition", "subscription"):
+            if current_kind == "file_search":
+                target_node = nodes_by_id.get(edge.get("target"))
+                if target_node and target_node.get("data", {}).get("kind") == "excel_column":
+                    continue
+            if current_kind in ("condition", "subscription", "file_search"):
                 handle = edge.get("sourceHandle") or "true"
-                result = condition_pass if current_kind == "condition" else subscription_pass
+                if current_kind == "condition":
+                    result = condition_pass
+                elif current_kind == "subscription":
+                    result = subscription_pass
+                else:
+                    result = search_pass
                 expected = "true" if result else "false"
                 if handle != expected:
                     continue
@@ -630,12 +885,12 @@ async def collect_content_targets_with_delay(
                 key = (target_id, target_chat_id)
                 if target_id and key not in seen_targets:
                     seen_targets.add(key)
-                    results.append((target_node, delay, target_chat_id))
+                    results.append((target_node, delay, target_chat_id, row_data))
             elif kind == "timer":
                 next_delay = delay + parse_timer_seconds(target_node)
-                queue.append((target_node.get("id") or "", next_delay, target_chat_id))
-            elif kind == "condition" or kind == "subscription":
-                queue.append((target_node.get("id") or "", delay, target_chat_id))
+                queue.append((target_node.get("id") or "", next_delay, target_chat_id, record_value, file_info, column_name, row_data))
+            elif kind in ("condition", "subscription", "record", "excel_file", "text_file", "excel_column", "file_search", "broadcast", "task"):
+                queue.append((target_node.get("id") or "", delay, target_chat_id, record_value, file_info, column_name, row_data))
             elif kind == "status_set":
                 if bot_id and effective_user_id is not None:
                     set_user_status(
@@ -643,11 +898,11 @@ async def collect_content_targets_with_delay(
                         effective_user_id,
                         target_node.get("data", {}).get("statusValue") or "",
                     )
-                queue.append((target_node.get("id") or "", delay, target_chat_id))
+                queue.append((target_node.get("id") or "", delay, target_chat_id, record_value, file_info, column_name, row_data))
             elif kind == "status_get":
-                queue.append((target_node.get("id") or "", delay, target_chat_id))
+                queue.append((target_node.get("id") or "", delay, target_chat_id, record_value, file_info, column_name, row_data))
             elif kind == "chat":
-                queue.append((target_node.get("id") or "", delay, target_chat_id))
+                queue.append((target_node.get("id") or "", delay, target_chat_id, record_value, file_info, column_name, row_data))
     return results
 
 
@@ -732,15 +987,17 @@ async def collect_scheduled_targets(
     source_id: str,
     bot_id: str,
     telegram_bot: TelegramBot,
-) -> List[Tuple[dict, float, int, Optional[dict]]]:
+) -> List[Tuple[dict, float, int, Optional[dict], Optional[dict]]]:
     nodes_by_id = {node.get("id"): node for node in flow.nodes}
-    results: List[Tuple[dict, float, int, Optional[dict]]] = []
+    results: List[Tuple[dict, float, int, Optional[dict], Optional[dict]]] = []
     user_entries = list_user_entries(bot_id)
     user_by_id = {entry["id"]: entry for entry in user_entries}
     visited: set[tuple[str, Optional[int], Optional[int]]] = set()
-    queue: List[Tuple[str, float, Optional[int], Optional[dict]]] = [(source_id, 0.0, None, None)]
+    queue: List[Tuple[str, float, Optional[int], Optional[dict], Optional[str], Optional[dict], Optional[str], Optional[dict]]] = [
+        (source_id, 0.0, None, None, None, None, None, None)
+    ]
     while queue:
-        current_id, delay, target_chat_id, entry = queue.pop(0)
+        current_id, delay, target_chat_id, entry, record_value, file_info, column_name, row_data = queue.pop(0)
         entry_id = entry["id"] if entry else None
         if not current_id or (current_id, target_chat_id, entry_id) in visited:
             continue
@@ -753,8 +1010,24 @@ async def collect_scheduled_targets(
                 for edge in flow.edges:
                     if edge.get("source") != current_id:
                         continue
-                    queue.append((edge.get("target") or "", delay, user_entry["id"], user_entry))
+                    queue.append((edge.get("target") or "", delay, user_entry["id"], user_entry, None, file_info, column_name, row_data))
             continue
+
+        if current_kind == "record" and entry:
+            record_field = current_node.get("data", {}).get("recordField") or ""
+            record_value = extract_record_value_from_entry(entry, record_field)
+        if current_kind in ("excel_file", "text_file") and current_node:
+            file_name = current_node.get("data", {}).get("fileName") or "data"
+            file_type = "excel" if current_kind == "excel_file" else "text"
+            file_info = {"type": file_type, "name": file_name}
+            if file_type == "text" and record_value is not None:
+                append_to_text_file(bot_id, file_name, record_value)
+        if current_kind == "excel_column" and current_node:
+            column_name = current_node.get("data", {}).get("columnName") or "Value"
+            if file_info is None:
+                file_info = resolve_excel_file_info(flow, nodes_by_id, current_id)
+            if file_info and file_info.get("type") == "excel":
+                append_to_excel_file(bot_id, file_info.get("name") or "data", column_name, record_value or "")
 
         if current_kind == "chat" and current_node:
             override_chat_id = parse_chat_id(current_node)
@@ -769,13 +1042,105 @@ async def collect_scheduled_targets(
             chat_id = parse_subscription_chat_id(current_node)
             if chat_id is not None:
                 subscription_pass = await is_user_subscribed(telegram_bot, chat_id, entry["id"])
+        search_pass = None
+        if current_kind == "file_search":
+            search_pass = False
+            row_data = None
+            payload = current_node.get("data", {})
+            search_source = (payload.get("searchSource") or "incoming").strip()
+            manual_value = (payload.get("searchValue") or "").strip()
+            search_value = ""
+            if search_source == "manual" and manual_value:
+                fake_message = type("Obj", (), {"chat": type("Obj", (), {"id": target_chat_id or 0})()})()
+                user_obj = None
+                if entry:
+                    user_obj = type(
+                        "Obj",
+                        (),
+                        {
+                            "id": entry.get("id"),
+                            "username": entry.get("username"),
+                            "first_name": entry.get("first_name"),
+                            "last_name": entry.get("last_name"),
+                        },
+                    )()
+                search_value = render_template(manual_value, fake_message, user_obj, target_chat_id or 0)
+            else:
+                search_value = (record_value or "").strip()
+            search_column = (payload.get("searchColumnName") or "").strip()
+            resolved_file_info = file_info
+            resolved_column = search_column or column_name or ""
+            for edge in flow.edges:
+                if edge.get("target") != current_id:
+                    continue
+                source_node = nodes_by_id.get(edge.get("source"))
+                if not source_node:
+                    continue
+                source_kind = source_node.get("data", {}).get("kind")
+                if source_kind == "text_file":
+                    if resolved_file_info is None:
+                        file_name = source_node.get("data", {}).get("fileName") or "data"
+                        resolved_file_info = {"type": "text", "name": file_name}
+                elif source_kind == "excel_column":
+                    if not search_column:
+                        resolved_column = (source_node.get("data", {}).get("columnName") or "").strip() or resolved_column
+                    if resolved_file_info is None:
+                        resolved_file_info = resolve_excel_file_info(flow, nodes_by_id, source_node.get("id") or "")
+                elif source_kind == "excel_file":
+                    if resolved_file_info is None:
+                        file_name = source_node.get("data", {}).get("fileName") or "data"
+                        resolved_file_info = {"type": "excel", "name": file_name}
+            for edge in flow.edges:
+                if edge.get("source") != current_id:
+                    continue
+                target_node = nodes_by_id.get(edge.get("target"))
+                if not target_node or target_node.get("data", {}).get("kind") != "excel_column":
+                    continue
+                if not search_column:
+                    resolved_column = (target_node.get("data", {}).get("columnName") or "").strip() or resolved_column
+                if resolved_file_info is None:
+                    resolved_file_info = resolve_excel_file_info(flow, nodes_by_id, target_node.get("id") or "")
+                if resolved_column and resolved_file_info:
+                    break
+            if resolved_file_info and search_value:
+                if resolved_file_info.get("type") == "excel" and resolved_column:
+                    path = get_excel_path(bot_id, resolved_file_info.get("name") or "data")
+                    if os.path.exists(path):
+                        with open(path, "r", encoding="utf-8") as file_obj:
+                            reader = csv.DictReader(file_obj)
+                            for row in reader:
+                                cell_value = (row.get(resolved_column) or "").strip()
+                                if cell_value.lower() == search_value.lower():
+                                    row_data = row
+                                    search_pass = True
+                                    break
+                if resolved_file_info.get("type") == "text":
+                    path = get_text_path(bot_id, resolved_file_info.get("name") or "data")
+                    if os.path.exists(path):
+                        with open(path, "r", encoding="utf-8") as file_obj:
+                            for line in file_obj:
+                                if line.strip().lower() == search_value.lower():
+                                    row_data = {"value": line.strip()}
+                                    search_pass = True
+                                    break
+            file_info = resolved_file_info or file_info
+            column_name = resolved_column or column_name
 
         for edge in flow.edges:
             if edge.get("source") != current_id:
                 continue
-            if current_kind in ("condition", "subscription"):
+            if current_kind == "file_search":
+                target_node = nodes_by_id.get(edge.get("target"))
+                if target_node and target_node.get("data", {}).get("kind") == "excel_column":
+                    continue
+            if current_kind in ("condition", "subscription", "file_search"):
                 handle = edge.get("sourceHandle") or "true"
-                result = condition_pass if current_kind == "condition" else subscription_pass
+                if current_kind == "condition":
+                    result = condition_pass
+                elif current_kind == "subscription":
+                    result = subscription_pass
+                else:
+                    result = search_pass
                 expected = "true" if result else "false"
                 if handle != expected:
                     continue
@@ -786,20 +1151,20 @@ async def collect_scheduled_targets(
             if kind in ("message", "image", "video", "audio", "document", "delete_message", "edit_message"):
                 chat_id = target_chat_id or (entry["id"] if entry else None)
                 if chat_id is not None:
-                    results.append((target_node, delay, chat_id, entry))
+                    results.append((target_node, delay, chat_id, entry, row_data))
             elif kind == "timer":
                 next_delay = delay + parse_timer_seconds(target_node)
-                queue.append((target_node.get("id") or "", next_delay, target_chat_id, entry))
-            elif kind in ("condition", "subscription", "broadcast"):
-                queue.append((target_node.get("id") or "", delay, target_chat_id, entry))
+                queue.append((target_node.get("id") or "", next_delay, target_chat_id, entry, record_value, file_info, column_name, row_data))
+            elif kind in ("condition", "subscription", "broadcast", "record", "excel_file", "text_file", "excel_column", "file_search", "task"):
+                queue.append((target_node.get("id") or "", delay, target_chat_id, entry, record_value, file_info, column_name, row_data))
             elif kind == "status_set":
                 if entry:
                     set_user_status(bot_id, entry["id"], target_node.get("data", {}).get("statusValue") or "")
-                queue.append((target_node.get("id") or "", delay, target_chat_id, entry))
+                queue.append((target_node.get("id") or "", delay, target_chat_id, entry, record_value, file_info, column_name, row_data))
             elif kind == "status_get":
-                queue.append((target_node.get("id") or "", delay, target_chat_id, entry))
+                queue.append((target_node.get("id") or "", delay, target_chat_id, entry, record_value, file_info, column_name, row_data))
             elif kind == "chat":
-                queue.append((target_node.get("id") or "", delay, target_chat_id, entry))
+                queue.append((target_node.get("id") or "", delay, target_chat_id, entry, record_value, file_info, column_name, row_data))
     return results
 
 
@@ -905,6 +1270,7 @@ async def send_content_node_to_chat(
     chat_id: int,
     target_node: dict,
     entry: Optional[dict],
+    row_data: Optional[dict] = None,
 ) -> None:
     payload = target_node.get("data", {})
     kind = payload.get("kind")
@@ -926,7 +1292,7 @@ async def send_content_node_to_chat(
                     "last_name": entry.get("last_name"),
                 },
             )()
-        message_text = render_template((raw_text or "").strip(), fake_message, user_obj, chat_id)
+        message_text = render_template((raw_text or "").strip(), fake_message, user_obj, chat_id, row_data=row_data)
         image_urls = collect_image_urls(flow, target_node.get("id") or "")
         video_urls = collect_video_urls(flow, target_node.get("id") or "")
         audio_urls = collect_audio_urls(flow, target_node.get("id") or "")
@@ -986,18 +1352,18 @@ async def send_content_node_to_chat(
 async def send_scheduled_targets_with_delay(
     flow: Flow,
     telegram_bot: TelegramBot,
-    targets: List[Tuple[dict, float, int, Optional[dict]]],
+    targets: List[Tuple[dict, float, int, Optional[dict], Optional[dict]]],
 ) -> None:
     if not targets:
         return
     ordered = sorted(targets, key=lambda item: item[1])
     elapsed = 0.0
-    for target_node, delay, chat_id, entry in ordered:
+    for target_node, delay, chat_id, entry, row_data in ordered:
         wait_time = delay - elapsed
         if wait_time > 0:
             await asyncio.sleep(wait_time)
             elapsed = delay
-        await send_content_node_to_chat(flow, telegram_bot, chat_id, target_node, entry)
+        await send_content_node_to_chat(flow, telegram_bot, chat_id, target_node, entry, row_data)
 
 
 async def task_scheduler_loop(
@@ -1374,6 +1740,7 @@ async def send_content_node(
     target_node: dict,
     target_chat_id: Optional[int] = None,
     source_user: Optional[object] = None,
+    row_data: Optional[dict] = None,
 ) -> None:
     payload = target_node.get("data", {})
     kind = payload.get("kind")
@@ -1391,7 +1758,7 @@ async def send_content_node(
             except Exception:
                 pass
         raw_text = payload.get("editMessageText") if is_edit else payload.get("messageText")
-        message_text = render_template((raw_text or "").strip(), message, source_user)
+        message_text = render_template((raw_text or "").strip(), message, source_user, row_data=row_data)
         image_urls = collect_image_urls(flow, target_node.get("id") or "")
         video_urls = collect_video_urls(flow, target_node.get("id") or "")
         audio_urls = collect_audio_urls(flow, target_node.get("id") or "")
@@ -1474,7 +1841,7 @@ async def send_content_node(
         reply_markup = build_reply_markup(flow, target_node.get("id") or "")
         await send_documents(message, urls, reply_markup=reply_markup, target_chat_id=target_chat_id)
         return
-    message_text = render_template((payload.get("messageText") or "").strip(), message, source_user)
+    message_text = render_template((payload.get("messageText") or "").strip(), message, source_user, row_data=row_data)
     image_urls = collect_image_urls(flow, target_node.get("id") or "")
     video_urls = collect_video_urls(flow, target_node.get("id") or "")
     audio_urls = collect_audio_urls(flow, target_node.get("id") or "")
@@ -1541,19 +1908,19 @@ async def send_content_node(
 async def send_targets_with_delay(
     flow: Flow,
     message: Message,
-    targets: List[Tuple[dict, float, Optional[int]]],
+    targets: List[Tuple[dict, float, Optional[int], Optional[dict]]],
     source_user: Optional[object] = None,
 ) -> None:
     if not targets:
         return
     ordered = sorted(targets, key=lambda item: item[1])
     elapsed = 0.0
-    for target_node, delay, target_chat_id in ordered:
+    for target_node, delay, target_chat_id, row_data in ordered:
         wait_time = delay - elapsed
         if wait_time > 0:
             await asyncio.sleep(wait_time)
             elapsed = delay
-        await send_content_node(flow, message, target_node, target_chat_id, source_user)
+        await send_content_node(flow, message, target_node, target_chat_id, source_user, row_data)
 
 
 async def run_bot_polling(bot: Bot) -> None:
@@ -1592,7 +1959,7 @@ async def run_bot_polling(bot: Bot) -> None:
                 return
         webhook_nodes = [node for node in flow.nodes if node.get("data", {}).get("kind") == "webhook"]
         if webhook_nodes:
-            all_targets: List[Tuple[dict, float, Optional[int]]] = []
+            all_targets: List[Tuple[dict, float, Optional[int], Optional[dict]]] = []
             for webhook_node in webhook_nodes:
                 all_targets.extend(
                     await collect_content_targets_with_delay(
@@ -1720,6 +2087,89 @@ def list_bot_users(bot_id: str) -> List[dict]:
 def list_bot_chats(bot_id: str) -> List[dict]:
     get_bot_or_404(bot_id)
     return list_chats(bot_id)
+
+
+@app.get("/bots/{bot_id}/files/excel/{name}")
+def download_excel_file(bot_id: str, name: str) -> FileResponse:
+    get_bot_or_404(bot_id)
+    path = get_excel_path(bot_id, name)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(path, media_type="text/csv", filename=os.path.basename(path))
+
+
+@app.post("/bots/{bot_id}/files/excel/upload")
+async def upload_excel_file(bot_id: str, file: UploadFile = File(...)) -> dict:
+    get_bot_or_404(bot_id)
+    original = file.filename or "data.csv"
+    base_name, ext = os.path.splitext(original)
+    base_name = base_name or "data"
+    safe_name = sanitize_filename(base_name)
+    path = get_excel_path(bot_id, safe_name)
+    ext = ext.lower()
+    content = await file.read()
+    if ext in ("", ".csv"):
+        with open(path, "wb") as file_obj:
+            file_obj.write(content)
+        return {"name": safe_name}
+    if ext in (".xlsx", ".xls"):
+        try:
+            import pandas as pd
+
+            engine = "openpyxl" if ext == ".xlsx" else "xlrd"
+            df = pd.read_excel(BytesIO(content), engine=engine)
+            df.to_csv(path, index=False)
+            return {"name": safe_name}
+        except ImportError:
+            pass
+        except Exception:
+            pass
+        if ext == ".xlsx":
+            try:
+                from openpyxl import load_workbook
+            except ImportError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Install openpyxl/pandas to upload xlsx/xls files",
+                )
+            wb = load_workbook(BytesIO(content), data_only=True)
+            ws = wb.active
+            rows = list(ws.iter_rows(values_only=True))
+            with open(path, "w", encoding="utf-8", newline="") as file_obj:
+                writer = csv.writer(file_obj)
+                if rows:
+                    headers = [str(cell) if cell is not None else "" for cell in rows[0]]
+                    writer.writerow(headers)
+                    for row in rows[1:]:
+                        writer.writerow(["" if cell is None else cell for cell in row])
+            return {"name": safe_name}
+        raise HTTPException(
+            status_code=400,
+            detail="Install pandas/xlrd to upload xls files",
+        )
+    raise HTTPException(status_code=400, detail="Unsupported file type")
+
+
+@app.get("/bots/{bot_id}/files/text/{name}")
+def download_text_file(bot_id: str, name: str) -> FileResponse:
+    get_bot_or_404(bot_id)
+    path = get_text_path(bot_id, name)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(path, media_type="text/plain", filename=os.path.basename(path))
+
+
+@app.post("/bots/{bot_id}/files/text/upload")
+async def upload_text_file(bot_id: str, file: UploadFile = File(...)) -> dict:
+    get_bot_or_404(bot_id)
+    original = file.filename or "data.txt"
+    base_name = os.path.splitext(original)[0] or "data"
+    safe_name = sanitize_filename(base_name)
+    path = get_text_path(bot_id, safe_name)
+    content = await file.read()
+    with open(path, "wb") as file_obj:
+        file_obj.write(content)
+    return {"name": safe_name}
 
 
 @app.patch("/bots/{bot_id}", response_model=Bot)

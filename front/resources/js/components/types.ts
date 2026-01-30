@@ -16,6 +16,11 @@ export type NodeKind =
     | 'status_get'
     | 'task'
     | 'broadcast'
+    | 'record'
+    | 'excel_file'
+    | 'text_file'
+    | 'excel_column'
+    | 'file_search'
     | 'subscription'
     | 'webhook'
     | 'condition'
@@ -53,6 +58,12 @@ export type NodeData = {
     taskIntervalMinutes?: number;
     taskDailyTime?: string;
     taskRunAt?: string;
+    recordField?: string;
+    fileName?: string;
+    columnName?: string;
+    searchColumnName?: string;
+    searchSource?: string;
+    searchValue?: string;
     timerSeconds?: number;
     conditionText?: string;
     conditionType?: string;

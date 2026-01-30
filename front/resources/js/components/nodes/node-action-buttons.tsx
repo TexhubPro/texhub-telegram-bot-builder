@@ -11,7 +11,7 @@ type Props = {
 export function NodeActionButtons({ nodeId, canEdit = true, canDuplicate = true }: Props) {
     const { onEditNode, onDeleteNode, onDuplicateNode } = useContext(GraphActionsContext);
     return (
-        <div className="pointer-events-none absolute -top-[8px] right-6 flex items-center gap-1 opacity-0 transition group-hover:opacity-100 group-hover:pointer-events-auto">
+        <div className="pointer-events-none absolute -top-[8px] right-6 z-20 flex items-center gap-1 opacity-0 transition group-hover:opacity-100 group-hover:pointer-events-auto">
             {canEdit ? (
                 <button
                     type="button"

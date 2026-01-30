@@ -27,13 +27,18 @@ import { ChatNode } from '../components/nodes/chat-node';
 import { DocumentNode } from '../components/nodes/document-node';
 import { DeleteMessageNode } from '../components/nodes/delete-message-node';
 import { EditMessageNode } from '../components/nodes/edit-message-node';
+import { ExcelColumnNode } from '../components/nodes/excel-column-node';
+import { ExcelFileNode } from '../components/nodes/excel-file-node';
+import { FileSearchNode } from '../components/nodes/file-search-node';
 import { ImageNode } from '../components/nodes/image-node';
 import { MessageButtonNode } from '../components/nodes/message-button-node';
 import { MessageNode } from '../components/nodes/message-node';
+import { RecordNode } from '../components/nodes/record-node';
 import { ReplyClearNode } from '../components/nodes/reply-clear-node';
 import { ReplyButtonNode } from '../components/nodes/reply-button-node';
 import { StyledNode } from '../components/nodes/styled-node';
 import { TaskNode } from '../components/nodes/task-node';
+import { TextFileNode } from '../components/nodes/text-file-node';
 import { TimerNode } from '../components/nodes/timer-node';
 import { StatusGetNode } from '../components/nodes/status-get-node';
 import { StatusSetNode } from '../components/nodes/status-set-node';
@@ -68,6 +73,11 @@ const NODE_KIND_LABELS: Record<NodeKind, string> = {
     status_get: 'Статус',
     task: 'Задача',
     broadcast: 'Рассылка',
+    record: 'Запись',
+    excel_file: 'Excel файл',
+    text_file: 'TXT файл',
+    excel_column: 'Столбец',
+    file_search: 'Поиск',
     subscription: 'Подписка',
     webhook: 'Вебхук',
     condition: 'Проверка',
@@ -133,6 +143,18 @@ const getNodeTitle = (node: Node<NodeData>) => {
         }
         case 'broadcast':
             return 'Рассылка';
+        case 'record':
+            return 'Запись';
+        case 'excel_file':
+            return node.data.fileName ? `Excel: ${node.data.fileName}` : 'Excel файл';
+        case 'text_file':
+            return node.data.fileName ? `TXT: ${node.data.fileName}` : 'TXT файл';
+        case 'excel_column':
+            return node.data.columnName ? `Столбец: ${node.data.columnName}` : 'Столбец';
+        case 'file_search':
+            return node.data.searchColumnName
+                ? `Поиск: ${node.data.searchColumnName}`
+                : 'Поиск в файле';
         case 'subscription': {
             const title = (node.data.subscriptionChatTitle ?? '').trim();
             return title ? `Подписка: ${title}` : 'Проверка подписки';
@@ -213,6 +235,12 @@ const buildEditorValues = (node: Node<NodeData>) => {
             node.data.taskIntervalMinutes !== undefined ? String(node.data.taskIntervalMinutes) : '60',
         taskDailyTime: node.data.taskDailyTime ?? '10:00',
         taskRunAt: node.data.taskRunAt ?? '',
+        recordField: node.data.recordField ?? 'text',
+        fileName: node.data.fileName ?? '',
+        columnName: node.data.columnName ?? '',
+        searchColumnName: node.data.searchColumnName ?? '',
+        searchSource: node.data.searchSource ?? 'incoming',
+        searchValue: node.data.searchValue ?? '',
         imageUrls: node.data.imageUrls ?? [],
         imageFiles: [] as File[],
         videoUrls: node.data.videoUrls ?? [],
@@ -259,6 +287,12 @@ export default function Welcome() {
         taskIntervalMinutes: '60',
         taskDailyTime: '10:00',
         taskRunAt: '',
+        recordField: 'text',
+        fileName: '',
+        columnName: '',
+        searchColumnName: '',
+        searchSource: 'incoming',
+        searchValue: '',
         imageUrls: [] as string[],
         imageFiles: [] as File[],
         videoUrls: [] as string[],
@@ -298,6 +332,11 @@ export default function Welcome() {
             status_get: StatusGetNode,
             task: TaskNode,
             broadcast: BroadcastNode,
+            record: RecordNode,
+            excel_file: ExcelFileNode,
+            text_file: TextFileNode,
+            excel_column: ExcelColumnNode,
+            file_search: FileSearchNode,
             subscription: SubscriptionNode,
             video: VideoNode,
             audio: AudioNode,
@@ -342,6 +381,15 @@ export default function Welcome() {
             onNodesChange(changes);
         },
         [onNodesChange]
+    );
+
+    const handleUpdateNodeData = useCallback(
+        (nodeId: string, patch: Partial<NodeData>) => {
+            setNodes((nds) =>
+                nds.map((node) => (node.id === nodeId ? { ...node, data: { ...node.data, ...patch } } : node))
+            );
+        },
+        [setNodes]
     );
 
     const handleOpenAddMenu = useCallback(
@@ -523,6 +571,57 @@ export default function Welcome() {
             data: { label: 'Рассылка', kind: 'broadcast' },
         });
     }, [addNode, generateId]);
+
+    const handleAddRecordNode = useCallback(() => {
+        addNodeAndEdit({
+            id: generateId('record'),
+            type: 'record',
+            position: { x: 520, y: 220 },
+            data: { label: 'Запись', kind: 'record', recordField: 'text' },
+        });
+    }, [addNodeAndEdit, generateId]);
+
+    const handleAddExcelFileNode = useCallback(() => {
+        addNodeAndEdit({
+            id: generateId('excel'),
+            type: 'excel_file',
+            position: { x: 520, y: 220 },
+            data: { label: 'Excel файл', kind: 'excel_file', fileName: '' },
+        });
+    }, [addNodeAndEdit, generateId]);
+
+    const handleAddTextFileNode = useCallback(() => {
+        addNodeAndEdit({
+            id: generateId('text'),
+            type: 'text_file',
+            position: { x: 520, y: 220 },
+            data: { label: 'TXT файл', kind: 'text_file', fileName: '' },
+        });
+    }, [addNodeAndEdit, generateId]);
+
+    const handleAddFileSearchNode = useCallback(() => {
+        addNodeAndEdit({
+            id: generateId('file-search'),
+            type: 'file_search',
+            position: { x: 520, y: 220 },
+            data: {
+                label: 'Поиск',
+                kind: 'file_search',
+                searchColumnName: '',
+                searchSource: 'incoming',
+                searchValue: '',
+            },
+        });
+    }, [addNodeAndEdit, generateId]);
+
+    const handleAddExcelColumnNode = useCallback(() => {
+        addNodeAndEdit({
+            id: generateId('excel-col'),
+            type: 'excel_column',
+            position: { x: 520, y: 220 },
+            data: { label: 'Столбец', kind: 'excel_column', columnName: '' },
+        });
+    }, [addNodeAndEdit, generateId]);
 
     const handleAddImageNode = useCallback(() => {
         addNodeAndEdit({
@@ -911,6 +1010,57 @@ export default function Welcome() {
                 };
             }
 
+            if (templateKey === 'record') {
+                newNode = {
+                    id: generateId('record'),
+                    type: 'record',
+                    position,
+                    data: { label: 'Запись', kind: 'record', recordField: 'text' },
+                };
+            }
+
+            if (templateKey === 'excel_file') {
+                newNode = {
+                    id: generateId('excel'),
+                    type: 'excel_file',
+                    position,
+                    data: { label: 'Excel файл', kind: 'excel_file', fileName: '' },
+                };
+            }
+
+            if (templateKey === 'text_file') {
+                newNode = {
+                    id: generateId('text'),
+                    type: 'text_file',
+                    position,
+                    data: { label: 'TXT файл', kind: 'text_file', fileName: '' },
+                };
+            }
+
+            if (templateKey === 'excel_column') {
+                newNode = {
+                    id: generateId('excel-col'),
+                    type: 'excel_column',
+                    position,
+                    data: { label: 'Столбец', kind: 'excel_column', columnName: '' },
+                };
+            }
+
+            if (templateKey === 'file_search') {
+                newNode = {
+                    id: generateId('file-search'),
+                    type: 'file_search',
+                    position,
+                    data: {
+                        label: 'Поиск',
+                        kind: 'file_search',
+                        searchColumnName: '',
+                        searchSource: 'incoming',
+                        searchValue: '',
+                    },
+                };
+            }
+
             if (!newNode) {
                 return;
             }
@@ -1068,6 +1218,26 @@ export default function Welcome() {
                                 taskIntervalMinutes: intervalMinutes,
                                 taskDailyTime: dailyTime,
                                 taskRunAt: editorValues.taskRunAt || '',
+                            },
+                        };
+                    }
+                    if (kind === 'record') {
+                        return { ...node, data: { ...node.data, recordField: editorValues.recordField } };
+                    }
+                    if (kind === 'excel_file' || kind === 'text_file') {
+                        return { ...node, data: { ...node.data, fileName: editorValues.fileName.trim() } };
+                    }
+                    if (kind === 'excel_column') {
+                        return { ...node, data: { ...node.data, columnName: editorValues.columnName.trim() } };
+                    }
+                    if (kind === 'file_search') {
+                        return {
+                            ...node,
+                            data: {
+                                ...node.data,
+                                searchColumnName: editorValues.searchColumnName.trim(),
+                                searchSource: editorValues.searchSource || 'incoming',
+                                searchValue: editorValues.searchValue,
                             },
                         };
                     }
@@ -1334,6 +1504,11 @@ export default function Welcome() {
                         target.data.kind === 'condition' ||
                         target.data.kind === 'subscription' ||
                         target.data.kind === 'broadcast' ||
+                        target.data.kind === 'record' ||
+                        target.data.kind === 'excel_file' ||
+                        target.data.kind === 'text_file' ||
+                        target.data.kind === 'excel_column' ||
+                        target.data.kind === 'file_search' ||
                         target.data.kind === 'chat'
                     ) {
                         stack.push(target.id);
@@ -1514,6 +1689,11 @@ export default function Welcome() {
                     node.data.kind === 'subscription' ||
                     node.data.kind === 'task' ||
                     node.data.kind === 'broadcast' ||
+                    node.data.kind === 'record' ||
+                    node.data.kind === 'excel_file' ||
+                    node.data.kind === 'text_file' ||
+                    node.data.kind === 'excel_column' ||
+                    node.data.kind === 'file_search' ||
                     !sources.has(node.id);
                 if (node.data.canAddChild === canAddChild) {
                     return node;
@@ -1607,6 +1787,10 @@ export default function Welcome() {
                         node.data.kind === 'subscription' ||
                         node.data.kind === 'task' ||
                         node.data.kind === 'broadcast' ||
+                        node.data.kind === 'record' ||
+                        node.data.kind === 'excel_file' ||
+                        node.data.kind === 'excel_column' ||
+                        node.data.kind === 'text_file' ||
                         node.data.kind === 'image' ||
                         node.data.kind === 'video' ||
                         node.data.kind === 'audio' ||
@@ -1629,6 +1813,11 @@ export default function Welcome() {
                         node.data.kind === 'subscription' ||
                         node.data.kind === 'task' ||
                         node.data.kind === 'broadcast' ||
+                        node.data.kind === 'record' ||
+                        node.data.kind === 'excel_file' ||
+                        node.data.kind === 'excel_column' ||
+                        node.data.kind === 'text_file' ||
+                        node.data.kind === 'file_search' ||
                         node.data.kind === 'timer'
                 );
             }
@@ -1648,6 +1837,10 @@ export default function Welcome() {
                         node.data.kind === 'subscription' ||
                         node.data.kind === 'task' ||
                         node.data.kind === 'broadcast' ||
+                        node.data.kind === 'record' ||
+                        node.data.kind === 'excel_file' ||
+                        node.data.kind === 'excel_column' ||
+                        node.data.kind === 'text_file' ||
                         node.data.kind === 'timer'
                 );
             }
@@ -1663,6 +1856,11 @@ export default function Welcome() {
                         node.data.kind === 'subscription' ||
                         node.data.kind === 'task' ||
                         node.data.kind === 'broadcast' ||
+                        node.data.kind === 'record' ||
+                        node.data.kind === 'excel_file' ||
+                        node.data.kind === 'excel_column' ||
+                        node.data.kind === 'text_file' ||
+                        node.data.kind === 'file_search' ||
                         node.data.kind === 'message' ||
                         node.data.kind === 'image' ||
                         node.data.kind === 'video' ||
@@ -1687,6 +1885,10 @@ export default function Welcome() {
                         node.data.kind === 'subscription' ||
                         node.data.kind === 'task' ||
                         node.data.kind === 'broadcast' ||
+                        node.data.kind === 'record' ||
+                        node.data.kind === 'excel_file' ||
+                        node.data.kind === 'excel_column' ||
+                        node.data.kind === 'text_file' ||
                         node.data.kind === 'timer'
                 );
             }
@@ -1705,6 +1907,10 @@ export default function Welcome() {
                         node.data.kind === 'subscription' ||
                         node.data.kind === 'task' ||
                         node.data.kind === 'broadcast' ||
+                        node.data.kind === 'record' ||
+                        node.data.kind === 'excel_file' ||
+                        node.data.kind === 'excel_column' ||
+                        node.data.kind === 'text_file' ||
                         node.data.kind === 'timer'
                 );
             }
@@ -1733,7 +1939,11 @@ export default function Welcome() {
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'subscription' ||
                         node.data.kind === 'task' ||
-                        node.data.kind === 'broadcast'
+                        node.data.kind === 'broadcast' ||
+                        node.data.kind === 'record' ||
+                        node.data.kind === 'excel_file' ||
+                        node.data.kind === 'excel_column' ||
+                        node.data.kind === 'text_file'
                 );
             }
             if (sourceKind === 'delete_message') {
@@ -1748,6 +1958,10 @@ export default function Welcome() {
                         node.data.kind === 'subscription' ||
                         node.data.kind === 'task' ||
                         node.data.kind === 'broadcast' ||
+                        node.data.kind === 'record' ||
+                        node.data.kind === 'excel_file' ||
+                        node.data.kind === 'excel_column' ||
+                        node.data.kind === 'text_file' ||
                         node.data.kind === 'timer'
                 );
             }
@@ -1766,6 +1980,10 @@ export default function Welcome() {
                         node.data.kind === 'subscription' ||
                         node.data.kind === 'task' ||
                         node.data.kind === 'broadcast' ||
+                        node.data.kind === 'record' ||
+                        node.data.kind === 'excel_file' ||
+                        node.data.kind === 'excel_column' ||
+                        node.data.kind === 'text_file' ||
                         node.data.kind === 'image' ||
                         node.data.kind === 'video' ||
                         node.data.kind === 'audio' ||
@@ -1786,6 +2004,10 @@ export default function Welcome() {
                         node.data.kind === 'subscription' ||
                         node.data.kind === 'task' ||
                         node.data.kind === 'broadcast' ||
+                        node.data.kind === 'record' ||
+                        node.data.kind === 'excel_file' ||
+                        node.data.kind === 'excel_column' ||
+                        node.data.kind === 'text_file' ||
                         node.data.kind === 'timer'
                 );
             }
@@ -1804,7 +2026,11 @@ export default function Welcome() {
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'timer' ||
                         node.data.kind === 'task' ||
-                        node.data.kind === 'broadcast'
+                        node.data.kind === 'broadcast' ||
+                        node.data.kind === 'record' ||
+                        node.data.kind === 'excel_file' ||
+                        node.data.kind === 'excel_column' ||
+                        node.data.kind === 'text_file'
                 );
             }
             if (sourceKind === 'task') {
@@ -1813,6 +2039,10 @@ export default function Welcome() {
                         node.data.kind === 'broadcast' ||
                         node.data.kind === 'condition' ||
                         node.data.kind === 'subscription' ||
+                        node.data.kind === 'record' ||
+                        node.data.kind === 'excel_file' ||
+                        node.data.kind === 'excel_column' ||
+                        node.data.kind === 'text_file' ||
                         node.data.kind === 'message' ||
                         node.data.kind === 'image' ||
                         node.data.kind === 'video' ||
@@ -1831,6 +2061,99 @@ export default function Welcome() {
                     (node) =>
                         node.data.kind === 'condition' ||
                         node.data.kind === 'subscription' ||
+                        node.data.kind === 'record' ||
+                        node.data.kind === 'excel_file' ||
+                        node.data.kind === 'excel_column' ||
+                        node.data.kind === 'text_file' ||
+                        node.data.kind === 'message' ||
+                        node.data.kind === 'image' ||
+                        node.data.kind === 'video' ||
+                        node.data.kind === 'audio' ||
+                        node.data.kind === 'document' ||
+                        node.data.kind === 'delete_message' ||
+                        node.data.kind === 'edit_message' ||
+                        node.data.kind === 'chat' ||
+                        node.data.kind === 'status_set' ||
+                        node.data.kind === 'status_get' ||
+                        node.data.kind === 'timer'
+                );
+            }
+            if (sourceKind === 'record') {
+                candidates = candidates.filter(
+                    (node) =>
+                        node.data.kind === 'excel_column' ||
+                        node.data.kind === 'text_file' ||
+                        node.data.kind === 'file_search' ||
+                        node.data.kind === 'message' ||
+                        node.data.kind === 'image' ||
+                        node.data.kind === 'video' ||
+                        node.data.kind === 'audio' ||
+                        node.data.kind === 'document' ||
+                        node.data.kind === 'delete_message' ||
+                        node.data.kind === 'edit_message' ||
+                        node.data.kind === 'chat' ||
+                        node.data.kind === 'status_set' ||
+                        node.data.kind === 'status_get' ||
+                        node.data.kind === 'timer'
+                );
+            }
+            if (sourceKind === 'excel_file') {
+                candidates = candidates.filter(
+                    (node) =>
+                        node.data.kind === 'excel_column' ||
+                        node.data.kind === 'record' ||
+                        node.data.kind === 'message' ||
+                        node.data.kind === 'image' ||
+                        node.data.kind === 'video' ||
+                        node.data.kind === 'audio' ||
+                        node.data.kind === 'document' ||
+                        node.data.kind === 'delete_message' ||
+                        node.data.kind === 'edit_message' ||
+                        node.data.kind === 'chat' ||
+                        node.data.kind === 'status_set' ||
+                        node.data.kind === 'status_get' ||
+                        node.data.kind === 'timer'
+                );
+            }
+            if (sourceKind === 'excel_column') {
+                candidates = candidates.filter(
+                    (node) =>
+                        node.data.kind === 'record' ||
+                        node.data.kind === 'file_search' ||
+                        node.data.kind === 'message' ||
+                        node.data.kind === 'image' ||
+                        node.data.kind === 'video' ||
+                        node.data.kind === 'audio' ||
+                        node.data.kind === 'document' ||
+                        node.data.kind === 'delete_message' ||
+                        node.data.kind === 'edit_message' ||
+                        node.data.kind === 'chat' ||
+                        node.data.kind === 'status_set' ||
+                        node.data.kind === 'status_get' ||
+                        node.data.kind === 'timer'
+                );
+            }
+            if (sourceKind === 'text_file') {
+                candidates = candidates.filter(
+                    (node) =>
+                        node.data.kind === 'record' ||
+                        node.data.kind === 'file_search' ||
+                        node.data.kind === 'message' ||
+                        node.data.kind === 'image' ||
+                        node.data.kind === 'video' ||
+                        node.data.kind === 'audio' ||
+                        node.data.kind === 'document' ||
+                        node.data.kind === 'delete_message' ||
+                        node.data.kind === 'edit_message' ||
+                        node.data.kind === 'chat' ||
+                        node.data.kind === 'status_set' ||
+                        node.data.kind === 'status_get' ||
+                        node.data.kind === 'timer'
+                );
+            }
+            if (sourceKind === 'file_search') {
+                candidates = candidates.filter(
+                    (node) =>
                         node.data.kind === 'message' ||
                         node.data.kind === 'image' ||
                         node.data.kind === 'video' ||
@@ -1878,6 +2201,11 @@ export default function Welcome() {
             { key: 'status_get', label: 'Статус', description: 'Получить статус пользователя' },
             { key: 'task', label: 'Задача', description: 'Расписание отправки' },
             { key: 'broadcast', label: 'Рассылка', description: 'Отправить всем' },
+            { key: 'record', label: 'Запись', description: 'Сохранить данные' },
+            { key: 'excel_file', label: 'Excel файл', description: 'Файл для записей' },
+            { key: 'excel_column', label: 'Excel столбец', description: 'Колонка для записи' },
+            { key: 'text_file', label: 'TXT файл', description: 'Текстовый файл' },
+            { key: 'file_search', label: 'Поиск', description: 'Поиск в файле' },
             { key: 'image', label: 'Изображения', description: 'Один или больше файлов' },
             { key: 'video', label: 'Видео', description: 'Видео файлы' },
             { key: 'audio', label: 'Аудио', description: 'Аудио файлы' },
@@ -1909,6 +2237,10 @@ export default function Welcome() {
                     item.key === 'subscription' ||
                     item.key === 'task' ||
                     item.key === 'broadcast' ||
+                    item.key === 'record' ||
+                    item.key === 'excel_file' ||
+                    item.key === 'excel_column' ||
+                    item.key === 'text_file' ||
                     item.key === 'image' ||
                     item.key === 'video' ||
                     item.key === 'audio' ||
@@ -1931,6 +2263,11 @@ export default function Welcome() {
                     item.key === 'subscription' ||
                     item.key === 'task' ||
                     item.key === 'broadcast' ||
+                    item.key === 'record' ||
+                    item.key === 'excel_file' ||
+                    item.key === 'excel_column' ||
+                    item.key === 'text_file' ||
+                    item.key === 'file_search' ||
                     item.key === 'timer'
             );
         }
@@ -1946,6 +2283,11 @@ export default function Welcome() {
                     item.key === 'subscription' ||
                     item.key === 'task' ||
                     item.key === 'broadcast' ||
+                    item.key === 'record' ||
+                    item.key === 'excel_file' ||
+                    item.key === 'excel_column' ||
+                    item.key === 'text_file' ||
+                    item.key === 'file_search' ||
                     item.key === 'message' ||
                     item.key === 'image' ||
                     item.key === 'video' ||
@@ -1970,6 +2312,10 @@ export default function Welcome() {
                     item.key === 'subscription' ||
                     item.key === 'task' ||
                     item.key === 'broadcast' ||
+                    item.key === 'record' ||
+                    item.key === 'excel_file' ||
+                    item.key === 'excel_column' ||
+                    item.key === 'text_file' ||
                     item.key === 'timer'
             );
         }
@@ -1989,6 +2335,10 @@ export default function Welcome() {
                     item.key === 'subscription' ||
                     item.key === 'task' ||
                     item.key === 'broadcast' ||
+                    item.key === 'record' ||
+                    item.key === 'excel_file' ||
+                    item.key === 'excel_column' ||
+                    item.key === 'text_file' ||
                     item.key === 'timer'
             );
         }
@@ -2007,6 +2357,10 @@ export default function Welcome() {
                     item.key === 'subscription' ||
                     item.key === 'task' ||
                     item.key === 'broadcast' ||
+                    item.key === 'record' ||
+                    item.key === 'excel_file' ||
+                    item.key === 'excel_column' ||
+                    item.key === 'text_file' ||
                     item.key === 'timer'
             );
         }
@@ -2035,7 +2389,11 @@ export default function Welcome() {
                     item.key === 'status_get' ||
                     item.key === 'subscription' ||
                     item.key === 'task' ||
-                    item.key === 'broadcast'
+                    item.key === 'broadcast' ||
+                    item.key === 'record' ||
+                    item.key === 'excel_file' ||
+                    item.key === 'excel_column' ||
+                    item.key === 'text_file'
             );
         }
         if (sourceKind === 'delete_message') {
@@ -2050,6 +2408,10 @@ export default function Welcome() {
                     item.key === 'subscription' ||
                     item.key === 'task' ||
                     item.key === 'broadcast' ||
+                    item.key === 'record' ||
+                    item.key === 'excel_file' ||
+                    item.key === 'excel_column' ||
+                    item.key === 'text_file' ||
                     item.key === 'timer'
             );
         }
@@ -2068,6 +2430,10 @@ export default function Welcome() {
                     item.key === 'subscription' ||
                     item.key === 'task' ||
                     item.key === 'broadcast' ||
+                    item.key === 'record' ||
+                    item.key === 'excel_file' ||
+                    item.key === 'excel_column' ||
+                    item.key === 'text_file' ||
                     item.key === 'image' ||
                     item.key === 'video' ||
                     item.key === 'audio' ||
@@ -2088,6 +2454,10 @@ export default function Welcome() {
                     item.key === 'subscription' ||
                     item.key === 'task' ||
                     item.key === 'broadcast' ||
+                    item.key === 'record' ||
+                    item.key === 'excel_file' ||
+                    item.key === 'excel_column' ||
+                    item.key === 'text_file' ||
                     item.key === 'timer'
             );
         }
@@ -2106,7 +2476,11 @@ export default function Welcome() {
                     item.key === 'status_get' ||
                     item.key === 'timer' ||
                     item.key === 'task' ||
-                    item.key === 'broadcast'
+                    item.key === 'broadcast' ||
+                    item.key === 'record' ||
+                    item.key === 'excel_file' ||
+                    item.key === 'excel_column' ||
+                    item.key === 'text_file'
             );
         }
         if (sourceKind === 'task') {
@@ -2115,6 +2489,10 @@ export default function Welcome() {
                     item.key === 'broadcast' ||
                     item.key === 'condition' ||
                     item.key === 'subscription' ||
+                    item.key === 'record' ||
+                    item.key === 'excel_file' ||
+                    item.key === 'excel_column' ||
+                    item.key === 'text_file' ||
                     item.key === 'message' ||
                     item.key === 'image' ||
                     item.key === 'video' ||
@@ -2133,6 +2511,99 @@ export default function Welcome() {
                 (item) =>
                     item.key === 'condition' ||
                     item.key === 'subscription' ||
+                    item.key === 'record' ||
+                    item.key === 'excel_file' ||
+                    item.key === 'excel_column' ||
+                    item.key === 'text_file' ||
+                    item.key === 'message' ||
+                    item.key === 'image' ||
+                    item.key === 'video' ||
+                    item.key === 'audio' ||
+                    item.key === 'document' ||
+                    item.key === 'delete_message' ||
+                    item.key === 'edit_message' ||
+                    item.key === 'chat' ||
+                    item.key === 'status_set' ||
+                    item.key === 'status_get' ||
+                    item.key === 'timer'
+            );
+        }
+        if (sourceKind === 'record') {
+            templates = createTemplates.filter(
+                (item) =>
+                    item.key === 'excel_column' ||
+                    item.key === 'text_file' ||
+                    item.key === 'file_search' ||
+                    item.key === 'message' ||
+                    item.key === 'image' ||
+                    item.key === 'video' ||
+                    item.key === 'audio' ||
+                    item.key === 'document' ||
+                    item.key === 'delete_message' ||
+                    item.key === 'edit_message' ||
+                    item.key === 'chat' ||
+                    item.key === 'status_set' ||
+                    item.key === 'status_get' ||
+                    item.key === 'timer'
+            );
+        }
+        if (sourceKind === 'excel_file') {
+            templates = createTemplates.filter(
+                (item) =>
+                    item.key === 'excel_column' ||
+                    item.key === 'record' ||
+                    item.key === 'message' ||
+                    item.key === 'image' ||
+                    item.key === 'video' ||
+                    item.key === 'audio' ||
+                    item.key === 'document' ||
+                    item.key === 'delete_message' ||
+                    item.key === 'edit_message' ||
+                    item.key === 'chat' ||
+                    item.key === 'status_set' ||
+                    item.key === 'status_get' ||
+                    item.key === 'timer'
+            );
+        }
+        if (sourceKind === 'excel_column') {
+            templates = createTemplates.filter(
+                (item) =>
+                    item.key === 'record' ||
+                    item.key === 'file_search' ||
+                    item.key === 'message' ||
+                    item.key === 'image' ||
+                    item.key === 'video' ||
+                    item.key === 'audio' ||
+                    item.key === 'document' ||
+                    item.key === 'delete_message' ||
+                    item.key === 'edit_message' ||
+                    item.key === 'chat' ||
+                    item.key === 'status_set' ||
+                    item.key === 'status_get' ||
+                    item.key === 'timer'
+            );
+        }
+        if (sourceKind === 'text_file') {
+            templates = createTemplates.filter(
+                (item) =>
+                    item.key === 'record' ||
+                    item.key === 'file_search' ||
+                    item.key === 'message' ||
+                    item.key === 'image' ||
+                    item.key === 'video' ||
+                    item.key === 'audio' ||
+                    item.key === 'document' ||
+                    item.key === 'delete_message' ||
+                    item.key === 'edit_message' ||
+                    item.key === 'chat' ||
+                    item.key === 'status_set' ||
+                    item.key === 'status_get' ||
+                    item.key === 'timer'
+            );
+        }
+        if (sourceKind === 'file_search') {
+            templates = createTemplates.filter(
+                (item) =>
                     item.key === 'message' ||
                     item.key === 'image' ||
                     item.key === 'video' ||
@@ -2174,6 +2645,11 @@ export default function Welcome() {
             { key: 'status_get', label: 'Статус', description: 'Получить статус пользователя', action: handleAddStatusGetNode },
             { key: 'task', label: 'Задача', description: 'Расписание отправки', action: handleAddTaskNode },
             { key: 'broadcast', label: 'Рассылка', description: 'Отправить всем', action: handleAddBroadcastNode },
+            { key: 'record', label: 'Запись', description: 'Сохранить данные', action: handleAddRecordNode, group: 'Работа с файлом' },
+            { key: 'excel_file', label: 'Excel файл', description: 'Файл для записей', action: handleAddExcelFileNode, group: 'Работа с файлом' },
+            { key: 'excel_column', label: 'Excel столбец', description: 'Колонка для записи', action: handleAddExcelColumnNode, group: 'Работа с файлом' },
+            { key: 'text_file', label: 'TXT файл', description: 'Текстовый файл', action: handleAddTextFileNode, group: 'Работа с файлом' },
+            { key: 'file_search', label: 'Поиск', description: 'Поиск в файле', action: handleAddFileSearchNode, group: 'Работа с файлом' },
             { key: 'image', label: 'Изображения', description: 'Один или больше файлов', action: handleAddImageNode },
             { key: 'video', label: 'Видео', description: 'Видео файлы', action: handleAddVideoNode },
             { key: 'audio', label: 'Аудио', description: 'Аудио файлы', action: handleAddAudioNode },
@@ -2199,6 +2675,11 @@ export default function Welcome() {
             handleAddStatusGetNode,
             handleAddTaskNode,
             handleAddBroadcastNode,
+            handleAddRecordNode,
+            handleAddExcelFileNode,
+            handleAddExcelColumnNode,
+            handleAddTextFileNode,
+            handleAddFileSearchNode,
             handleAddImageNode,
             handleAddVideoNode,
             handleAddAudioNode,
@@ -2254,6 +2735,7 @@ export default function Welcome() {
                                     onDeleteNode: handleDeleteNodeById,
                                     onDeleteEdge: handleDeleteEdgeById,
                                     onDuplicateNode: handleDuplicateNodeById,
+                                    onUpdateNode: handleUpdateNodeData,
                                 }}
                             >
                                 <main className="relative flex-1">

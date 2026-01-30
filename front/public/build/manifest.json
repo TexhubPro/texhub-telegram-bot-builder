@@ -1,0 +1,56 @@
+{
+  "_welcome-B5DZHykP.css": {
+    "file": "assets/welcome-B5DZHykP.css",
+    "src": "_welcome-B5DZHykP.css"
+  },
+  "_welcome-CZ6lmXop.js": {
+    "file": "assets/welcome-CZ6lmXop.js",
+    "name": "welcome",
+    "isDynamicEntry": true,
+    "imports": [
+      "resources/js/app.tsx"
+    ],
+    "dynamicImports": [
+      "node_modules/@heroui/dom-animation/dist/index.mjs",
+      "node_modules/@heroui/dom-animation/dist/index.mjs",
+      "node_modules/@heroui/dom-animation/dist/index.mjs"
+    ],
+    "css": [
+      "assets/welcome-B5DZHykP.css"
+    ]
+  },
+  "node_modules/@heroui/dom-animation/dist/index.mjs": {
+    "file": "assets/index-qiCvPpOO.js",
+    "name": "index",
+    "src": "node_modules/@heroui/dom-animation/dist/index.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_welcome-CZ6lmXop.js",
+      "resources/js/app.tsx"
+    ],
+    "css": [
+      "assets/app-BqcafZXB.css"
+    ]
+  },
+  "resources/css/app.css": {
+    "file": "assets/app-BqcafZXB.css",
+    "src": "resources/css/app.css",
+    "isEntry": true,
+    "name": "app",
+    "names": [
+      "app.css"
+    ]
+  },
+  "resources/js/app.tsx": {
+    "file": "assets/app-XwacWVky.js",
+    "name": "app",
+    "src": "resources/js/app.tsx",
+    "isEntry": true,
+    "dynamicImports": [
+      "_welcome-CZ6lmXop.js"
+    ],
+    "css": [
+      "assets/app-BqcafZXB.css"
+    ]
+  }
+}

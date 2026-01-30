@@ -1,4 +1,5 @@
 ﻿import { Button, Card, CardBody, Divider } from '@heroui/react';
+import { useRef, useState } from 'react';
 import type { Node } from 'reactflow';
 import type { NodeData, NodeKind } from '../types';
 import { FieldInput } from '../ui/field-input';
@@ -34,6 +35,12 @@ type Values = {
     taskIntervalMinutes: string;
     taskDailyTime: string;
     taskRunAt: string;
+    recordField: string;
+    fileName: string;
+    columnName: string;
+    searchColumnName: string;
+    searchSource: string;
+    searchValue: string;
     conditionText: string;
     conditionType: string;
     conditionLengthOp: string;
@@ -84,6 +91,16 @@ const getTitle = (kind?: NodeKind) => {
             return 'Задача';
         case 'broadcast':
             return 'Рассылка';
+        case 'record':
+            return 'Запись';
+        case 'excel_file':
+            return 'Excel файл';
+        case 'text_file':
+            return 'TXT файл';
+        case 'excel_column':
+            return 'Excel столбец';
+        case 'file_search':
+            return 'Поиск в файле';
         case 'condition':
             return 'Проверка';
         case 'webhook':
@@ -106,10 +123,66 @@ export function NodeEditorPanel({ node, values, chatOptions, subscriptionOptions
 
     const kind = node.data.kind;
     const title = getTitle(kind);
+    const uploadInputRef = useRef<HTMLInputElement | null>(null);
+    const [isUploading, setIsUploading] = useState(false);
     const getFileLabel = (value: string) => {
         const trimmed = value.split('?')[0];
         const parts = trimmed.split('/');
         return parts[parts.length - 1] || value;
+    };
+    const handleOpenFile = () => {
+        const name = values.fileName.trim();
+        if (!name) {
+            return;
+        }
+        const botId = window.localStorage.getItem('botId');
+        if (!botId) {
+            return;
+        }
+        const type = kind === 'excel_file' ? 'excel' : 'text';
+        const url = `http://localhost:8001/bots/${botId}/files/${type}/${encodeURIComponent(name)}`;
+        window.open(url, '_blank');
+    };
+    const handleUploadFile = async (file: File) => {
+        const botId = window.localStorage.getItem('botId');
+        if (!botId) {
+            return;
+        }
+        const lower = file.name.toLowerCase();
+        if (kind === 'excel_file') {
+            const ok = lower.endsWith('.csv') || lower.endsWith('.xlsx') || lower.endsWith('.xls');
+            if (!ok) {
+                window.alert('Загрузите CSV, XLSX или XLS файл.');
+                return;
+            }
+        }
+        if (kind === 'text_file') {
+            const ok = lower.endsWith('.txt');
+            if (!ok) {
+                window.alert('Загрузите TXT файл.');
+                return;
+            }
+        }
+        setIsUploading(true);
+        try {
+            const form = new FormData();
+            form.append('file', file);
+            const type = kind === 'excel_file' ? 'excel' : 'text';
+            const response = await fetch(`http://localhost:8001/bots/${botId}/files/${type}/upload`, {
+                method: 'POST',
+                body: form,
+            });
+            if (!response.ok) {
+                window.alert('Не удалось загрузить файл.');
+                return;
+            }
+            const payload = (await response.json()) as { name?: string };
+            const nextName = payload.name || file.name.replace(/\.[^.]+$/i, '');
+            onChange({ ...values, fileName: nextName });
+            setTimeout(() => onSave(), 0);
+        } finally {
+            setIsUploading(false);
+        }
     };
 
     return (
@@ -280,6 +353,107 @@ export function NodeEditorPanel({ node, values, chatOptions, subscriptionOptions
                                             </option>
                                         ))}
                                     </select>
+                                </div>
+                            ) : null}
+                            {kind === 'record' ? (
+                                <div className="flex flex-col gap-2">
+                                    <label className="block text-xs font-semibold text-slate-600">Данные для записи</label>
+                                    <select
+                                        value={values.recordField}
+                                        onChange={(event) => onChange({ ...values, recordField: event.target.value })}
+                                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                                    >
+                                        <option value="text">Текст сообщения</option>
+                                        <option value="name">Имя</option>
+                                        <option value="first_name">First name</option>
+                                        <option value="last_name">Last name</option>
+                                        <option value="username">Username</option>
+                                        <option value="full_name">Полное имя</option>
+                                        <option value="chat_id">Chat ID</option>
+                                        <option value="photo_id">Photo file_id</option>
+                                        <option value="video_id">Video file_id</option>
+                                        <option value="audio_id">Audio file_id</option>
+                                        <option value="document_id">Document file_id</option>
+                                    </select>
+                                </div>
+                            ) : null}
+                            {kind === 'excel_file' || kind === 'text_file' ? (
+                                <div className="flex flex-col gap-3">
+                                    <FieldInput
+                                        label="Имя файла"
+                                        value={values.fileName}
+                                        onChange={(value) => onChange({ ...values, fileName: value })}
+                                        placeholder={kind === 'excel_file' ? 'clients' : 'log'}
+                                    />
+                                    <div className="flex items-center gap-2">
+                                        <Button
+                                            size="sm"
+                                            variant="flat"
+                                            onPress={() => uploadInputRef.current?.click()}
+                                            isDisabled={isUploading}
+                                        >
+                                            Загрузить файл
+                                        </Button>
+                                        <Button size="sm" variant="flat" onPress={handleOpenFile}>
+                                            Открыть файл
+                                        </Button>
+                                        <input
+                                            ref={uploadInputRef}
+                                            type="file"
+                                            accept={
+                                                kind === 'excel_file'
+                                                    ? '.csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel'
+                                                    : '.txt,text/plain'
+                                            }
+                                            className="hidden"
+                                            onChange={(event) => {
+                                                const file = event.target.files?.[0];
+                                                if (file) {
+                                                    handleUploadFile(file);
+                                                }
+                                                event.target.value = '';
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                            ) : null}
+                            {kind === 'excel_column' ? (
+                                <FieldInput
+                                    label="Имя столбца"
+                                    value={values.columnName}
+                                    onChange={(value) => onChange({ ...values, columnName: value })}
+                                    placeholder="Имя"
+                                />
+                            ) : null}
+                            {kind === 'file_search' ? (
+                                <div className="flex flex-col gap-3">
+                                    <div className="flex flex-col gap-2">
+                                        <label className="block text-xs font-semibold text-slate-600">Источник поиска</label>
+                                        <select
+                                            value={values.searchSource}
+                                            onChange={(event) =>
+                                                onChange({ ...values, searchSource: event.target.value })
+                                            }
+                                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                                        >
+                                            <option value="incoming">Из входа</option>
+                                            <option value="manual">Ручной текст</option>
+                                        </select>
+                                    </div>
+                                    {values.searchSource === 'manual' ? (
+                                        <FieldInput
+                                            label="Текст для поиска"
+                                            value={values.searchValue}
+                                            onChange={(value) => onChange({ ...values, searchValue: value })}
+                                            placeholder="{name} или любой текст"
+                                        />
+                                    ) : null}
+                                    <FieldInput
+                                        label="Столбец (опционально)"
+                                        value={values.searchColumnName}
+                                        onChange={(value) => onChange({ ...values, searchColumnName: value })}
+                                        placeholder="Название столбца"
+                                    />
                                 </div>
                             ) : null}
                             {kind === 'status_set' ? (
@@ -667,3 +841,6 @@ export function NodeEditorPanel({ node, values, chatOptions, subscriptionOptions
         </aside>
     );
 }
+
+
+
