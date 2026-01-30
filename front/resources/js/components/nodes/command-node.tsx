@@ -1,6 +1,7 @@
 import { useContext } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { AddEdgeMenuContext } from './add-edge-context';
+import { NodeActionButtons } from './node-action-buttons';
 import type { NodeData } from '../types';
 import { PlusIcon } from '../ui/icons';
 
@@ -13,6 +14,7 @@ export function CommandNode({ data, id }: NodeProps<NodeData>) {
                 position={Position.Left}
                 style={{ width: 14, height: 14, borderWidth: 2, background: '#4338ca' }}
             />
+            <NodeActionButtons nodeId={id} canEdit />
             <div className="min-w-[150px]">
                 <div className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Команда</div>
                 <div className="text-sm font-semibold">{data.commandText ?? '/start'}</div>

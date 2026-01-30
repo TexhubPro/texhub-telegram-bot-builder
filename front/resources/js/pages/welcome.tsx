@@ -19,12 +19,15 @@ import { BotNode } from '../components/nodes/bot-node';
 import { ButtonRowNode } from '../components/nodes/button-row-node';
 import { CommandNode } from '../components/nodes/command-node';
 import { NodeContextMenu } from '../components/nodes/context-menu';
+import { GraphActionsContext } from '../components/nodes/graph-actions-context';
 import { ImageNode } from '../components/nodes/image-node';
 import { MessageButtonNode } from '../components/nodes/message-button-node';
 import { MessageNode } from '../components/nodes/message-node';
 import { ReplyButtonNode } from '../components/nodes/reply-button-node';
 import { StyledNode } from '../components/nodes/styled-node';
+import { NodeEditorPanel } from '../components/sidebar/node-editor-panel';
 import { Sidebar } from '../components/sidebar/sidebar';
+import { DeletableEdge } from '../components/edges/deletable-edge';
 import type { Bot, ContextMenu, NodeData, NodeKind } from '../components/types';
 
 const API_BASE = 'http://localhost:8001';
@@ -76,6 +79,13 @@ const getClientPosition = (event: MouseEvent | TouchEvent) => {
     return { x: mouseEvent.clientX, y: mouseEvent.clientY };
 };
 
+const buildEditorValues = (node: Node<NodeData>) => ({
+    commandText: node.data.commandText ?? '',
+    messageText: node.data.messageText ?? '',
+    buttonText: node.data.buttonText ?? '',
+    imageUrls: (node.data.imageUrls ?? []).join('\n'),
+});
+
 export default function Welcome() {
     const [nodes, setNodes, onNodesChange] = useNodesState<NodeData>(initialNodes);
     const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -84,6 +94,13 @@ export default function Welcome() {
     const [bot, setBot] = useState<Bot | null>(null);
     const [isHydrating, setIsHydrating] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    const [editorNodeId, setEditorNodeId] = useState<string | null>(null);
+    const [editorValues, setEditorValues] = useState({
+        commandText: '',
+        messageText: '',
+        buttonText: '',
+        imageUrls: '',
+    });
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const saveTimerRef = useRef<number | null>(null);
     const connectSourceRef = useRef<string | null>(null);
@@ -99,6 +116,18 @@ export default function Welcome() {
             button_row: ButtonRowNode,
             image: ImageNode,
             bot: BotNode,
+        }),
+        []
+    );
+
+    const edgeTypes = useMemo(
+        () => ({
+            default: DeletableEdge,
+            bezier: DeletableEdge,
+            smoothstep: DeletableEdge,
+            step: DeletableEdge,
+            straight: DeletableEdge,
+            deletable: DeletableEdge,
         }),
         []
     );
@@ -175,31 +204,32 @@ export default function Welcome() {
         [setNodes]
     );
 
+    const addNodeAndEdit = useCallback(
+        (node: Node<NodeData>) => {
+            setNodes((nds) => nds.concat(node));
+            setEditorNodeId(node.id);
+            setEditorValues(buildEditorValues(node));
+        },
+        [setNodes]
+    );
+
     const handleAddCommandNode = useCallback(() => {
-        const command = window.prompt('Команда', '/start');
-        if (!command) {
-            return;
-        }
-        addNode({
+        addNodeAndEdit({
             id: generateId('command'),
             type: 'command',
             position: { x: 180, y: 180 },
-            data: { label: 'Команда', kind: 'command', commandText: command },
+            data: { label: 'Команда', kind: 'command', commandText: '/start' },
         });
-    }, [addNode, generateId]);
+    }, [addNodeAndEdit, generateId]);
 
     const handleAddMessageNode = useCallback(() => {
-        const message = window.prompt('Сообщение', 'Привет');
-        if (!message) {
-            return;
-        }
-        addNode({
+        addNodeAndEdit({
             id: generateId('message'),
             type: 'message',
             position: { x: 420, y: 180 },
-            data: { label: 'Сообщение', kind: 'message', messageText: message },
+            data: { label: 'Сообщение', kind: 'message', messageText: 'Привет' },
         });
-    }, [addNode, generateId]);
+    }, [addNodeAndEdit, generateId]);
 
     const handleAddRowNode = useCallback(() => {
         addNode({
@@ -211,47 +241,31 @@ export default function Welcome() {
     }, [addNode, generateId]);
 
     const handleAddImageNode = useCallback(() => {
-        const raw = window.prompt('Ссылки на изображения (через запятую или с новой строки)', '');
-        if (raw === null) {
-            return;
-        }
-        const imageUrls = raw
-            .split(/[\n,]+/g)
-            .map((item) => item.trim())
-            .filter(Boolean);
-        addNode({
+        addNodeAndEdit({
             id: generateId('image'),
             type: 'image',
             position: { x: 520, y: 220 },
-            data: { label: 'Изображения', kind: 'image', imageUrls },
+            data: { label: 'Изображения', kind: 'image', imageUrls: [] },
         });
-    }, [addNode, generateId]);
+    }, [addNodeAndEdit, generateId]);
 
     const handleAddMessageButtonNode = useCallback(() => {
-        const text = window.prompt('Текст кнопки', 'Подробнее');
-        if (!text) {
-            return;
-        }
-        addNode({
+        addNodeAndEdit({
             id: generateId('message_button'),
             type: 'message_button',
             position: { x: 520, y: 220 },
-            data: { label: 'Message Button', kind: 'message_button', buttonText: text },
+            data: { label: 'Message Button', kind: 'message_button', buttonText: 'Кнопка' },
         });
-    }, [addNode, generateId]);
+    }, [addNodeAndEdit, generateId]);
 
     const handleAddReplyButtonNode = useCallback(() => {
-        const text = window.prompt('Текст кнопки', 'Да');
-        if (!text) {
-            return;
-        }
-        addNode({
+        addNodeAndEdit({
             id: generateId('reply_button'),
             type: 'reply_button',
             position: { x: 520, y: 260 },
-            data: { label: 'Reply Button', kind: 'reply_button', buttonText: text },
+            data: { label: 'Reply Button', kind: 'reply_button', buttonText: 'Кнопка' },
         });
-    }, [addNode, generateId]);
+    }, [addNodeAndEdit, generateId]);
 
 
     const applyBotToNode = useCallback(
@@ -299,15 +313,6 @@ export default function Welcome() {
         applyBotToNode(updated);
     }, [bot, applyBotToNode]);
 
-    const handleNodeContextMenu = useCallback((event: React.MouseEvent, node: Node<NodeData>) => {
-        event.preventDefault();
-        setMenu({ kind: 'node', id: node.id, x: event.clientX, y: event.clientY });
-    }, []);
-
-    const handleEdgeContextMenu = useCallback((event: React.MouseEvent, edge: Edge) => {
-        event.preventDefault();
-        setMenu({ kind: 'edge', id: edge.id, x: event.clientX, y: event.clientY });
-    }, []);
 
     const handleLinkToNode = useCallback(
         (targetId: string) => {
@@ -344,54 +349,38 @@ export default function Welcome() {
             let newNode: Node<NodeData> | null = null;
 
             if (templateKey === 'command') {
-                const command = window.prompt('Команда', '/start');
-                if (!command) {
-                    return;
-                }
                 newNode = {
                     id: generateId('command'),
                     type: 'command',
                     position,
-                    data: { label: 'Команда', kind: 'command', commandText: command },
+                    data: { label: 'Команда', kind: 'command', commandText: '/start' },
                 };
             }
 
             if (templateKey === 'message') {
-                const message = window.prompt('Сообщение', 'Привет');
-                if (!message) {
-                    return;
-                }
                 newNode = {
                     id: generateId('message'),
                     type: 'message',
                     position,
-                    data: { label: 'Сообщение', kind: 'message', messageText: message },
+                    data: { label: 'Сообщение', kind: 'message', messageText: 'Привет' },
                 };
             }
 
             if (templateKey === 'message_button') {
-                const text = window.prompt('Текст кнопки', 'Подробнее');
-                if (!text) {
-                    return;
-                }
                 newNode = {
                     id: generateId('message_button'),
                     type: 'message_button',
                     position,
-                    data: { label: 'Message Button', kind: 'message_button', buttonText: text },
+                    data: { label: 'Message Button', kind: 'message_button', buttonText: 'Кнопка' },
                 };
             }
 
             if (templateKey === 'reply_button') {
-                const text = window.prompt('Текст кнопки', 'Да');
-                if (!text) {
-                    return;
-                }
                 newNode = {
                     id: generateId('reply_button'),
                     type: 'reply_button',
                     position,
-                    data: { label: 'Reply Button', kind: 'reply_button', buttonText: text },
+                    data: { label: 'Reply Button', kind: 'reply_button', buttonText: 'Кнопка' },
                 };
             }
 
@@ -405,19 +394,11 @@ export default function Welcome() {
             }
 
             if (templateKey === 'image') {
-                const raw = window.prompt('Ссылки на изображения (через запятую или с новой строки)', '');
-                if (raw === null) {
-                    return;
-                }
-                const imageUrls = raw
-                    .split(/[\n,]+/g)
-                    .map((item) => item.trim())
-                    .filter(Boolean);
                 newNode = {
                     id: generateId('image'),
                     type: 'image',
                     position,
-                    data: { label: 'Изображения', kind: 'image', imageUrls },
+                    data: { label: 'Изображения', kind: 'image', imageUrls: [] },
                 };
             }
 
@@ -437,6 +418,10 @@ export default function Welcome() {
                     eds
                 )
             );
+            if (newNode.data.kind !== 'button_row') {
+                setEditorNodeId(newNode.id);
+                setEditorValues(buildEditorValues(newNode));
+            }
             setMenu(null);
         },
         [generateId, menu, nodes, setEdges, setNodes]
@@ -450,132 +435,75 @@ export default function Welcome() {
         setMenu(null);
     }, []);
 
-    const handleEditCommand = useCallback(() => {
-        if (!menu || menu.kind !== 'node') {
-            return;
-        }
-        const currentNode = nodes.find((node) => node.id === menu.id);
-        if (!currentNode || currentNode.data.kind !== 'command') {
-            return;
-        }
-        const command = window.prompt('Команда', currentNode.data.commandText ?? '/start');
-        if (!command) {
+    const openEditorForNode = useCallback((node: Node<NodeData>) => {
+        setEditorNodeId(node.id);
+        setEditorValues(buildEditorValues(node));
+    }, []);
+
+    const closeEditor = useCallback(() => {
+        setEditorNodeId(null);
+    }, []);
+
+    const handleSaveEditor = useCallback(() => {
+        if (!editorNodeId) {
             return;
         }
         setNodes((nds) =>
-            nds.map((node) =>
-                node.id === menu.id ? { ...node, data: { ...node.data, commandText: command } } : node
-            )
+            nds.map((node) => {
+                if (node.id !== editorNodeId) {
+                    return node;
+                }
+                const kind = node.data.kind;
+                if (kind === 'command') {
+                    return { ...node, data: { ...node.data, commandText: editorValues.commandText } };
+                }
+                if (kind === 'message') {
+                    return { ...node, data: { ...node.data, messageText: editorValues.messageText } };
+                }
+                if (kind === 'message_button' || kind === 'reply_button') {
+                    return { ...node, data: { ...node.data, buttonText: editorValues.buttonText } };
+                }
+                if (kind === 'image') {
+                    const imageUrls = editorValues.imageUrls
+                        .split(/[\n,]+/g)
+                        .map((item) => item.trim())
+                        .filter(Boolean);
+                    return { ...node, data: { ...node.data, imageUrls } };
+                }
+                return node;
+            })
         );
-        setMenu(null);
-    }, [menu, nodes, setNodes]);
+        closeEditor();
+    }, [closeEditor, editorNodeId, editorValues, setNodes]);
 
-    const handleEditMessage = useCallback(() => {
-        if (!menu || menu.kind !== 'node') {
-            return;
-        }
-        const currentNode = nodes.find((node) => node.id === menu.id);
-        if (!currentNode || currentNode.data.kind !== 'message') {
-            return;
-        }
-        const message = window.prompt('Сообщение', currentNode.data.messageText ?? 'Привет');
-        if (!message) {
-            return;
-        }
-        setNodes((nds) =>
-            nds.map((node) =>
-                node.id === menu.id ? { ...node, data: { ...node.data, messageText: message } } : node
-            )
-        );
-        setMenu(null);
-    }, [menu, nodes, setNodes]);
+    const handleEditNode = useCallback(
+        (nodeId: string) => {
+            const node = nodes.find((item) => item.id === nodeId);
+            if (node) {
+                openEditorForNode(node);
+            }
+        },
+        [nodes, openEditorForNode]
+    );
 
-    const handleEditButtonText = useCallback(() => {
-        if (!menu || menu.kind !== 'node') {
-            return;
-        }
-        const currentNode = nodes.find((node) => node.id === menu.id);
-        if (!currentNode) {
-            return;
-        }
-        if (currentNode.data.kind !== 'message_button' && currentNode.data.kind !== 'reply_button') {
-            return;
-        }
-        const text = window.prompt('Текст кнопки', currentNode.data.buttonText ?? 'Кнопка');
-        if (!text) {
-            return;
-        }
-        setNodes((nds) =>
-            nds.map((node) =>
-                node.id === menu.id ? { ...node, data: { ...node.data, buttonText: text } } : node
-            )
-        );
-        setMenu(null);
-    }, [menu, nodes, setNodes]);
+    const handleDeleteNodeById = useCallback(
+        (nodeId: string) => {
+            setNodes((nds) => nds.filter((node) => node.id !== nodeId));
+            setEdges((eds) => eds.filter((edge) => edge.source !== nodeId && edge.target !== nodeId));
+            if (editorNodeId === nodeId) {
+                setEditorNodeId(null);
+            }
+        },
+        [editorNodeId, setEdges, setNodes]
+    );
 
-    const handleEditImageList = useCallback(() => {
-        if (!menu || menu.kind !== 'node') {
-            return;
-        }
-        const currentNode = nodes.find((node) => node.id === menu.id);
-        if (!currentNode || currentNode.data.kind !== 'image') {
-            return;
-        }
-        const currentList = currentNode.data.imageUrls ?? [];
-        const raw = window.prompt('Ссылки на изображения (через запятую или с новой строки)', currentList.join('\n'));
-        if (raw === null) {
-            return;
-        }
-        const imageUrls = raw
-            .split(/[\n,]+/g)
-            .map((item) => item.trim())
-            .filter(Boolean);
-        setNodes((nds) =>
-            nds.map((node) =>
-                node.id === menu.id ? { ...node, data: { ...node.data, imageUrls } } : node
-            )
-        );
-        setMenu(null);
-    }, [menu, nodes, setNodes]);
+    const handleDeleteEdgeById = useCallback(
+        (edgeId: string) => {
+            setEdges((eds) => eds.filter((edge) => edge.id !== edgeId));
+        },
+        [setEdges]
+    );
 
-    const handleEditBotToken = useCallback(async () => {
-        if (!menu || menu.kind !== 'node' || !bot) {
-            return;
-        }
-        const token = window.prompt('Новый токен бота', bot.token ?? '');
-        if (token === null) {
-            return;
-        }
-        const response = await fetch(`${API_BASE}/bots/${bot.id}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: token || null }),
-        });
-        if (!response.ok) {
-            return;
-        }
-        const updated: Bot = await response.json();
-        setBot(updated);
-        applyBotToNode(updated);
-        setMenu(null);
-    }, [menu, bot, applyBotToNode]);
-
-    const handleDeleteNode = useCallback(() => {
-        if (!menu || menu.kind !== 'node') {
-            return;
-        }
-        setNodes((nds) => nds.filter((node) => node.id !== menu.id));
-        setEdges((eds) => eds.filter((edge) => edge.source !== menu.id && edge.target !== menu.id));
-        setMenu(null);
-    }, [menu, setEdges, setNodes]);
-
-    const handleDeleteEdge = useCallback(() => {
-        if (!menu || menu.kind !== 'edge') {
-            return;
-        }
-        setEdges((eds) => eds.filter((edge) => edge.id !== menu.id));
-        setMenu(null);
-    }, [menu, setEdges]);
 
     const handleStartBot = useCallback(async () => {
         if (!bot) {
@@ -760,7 +688,7 @@ export default function Welcome() {
         });
     }, [edges, setNodes]);
 
-    const currentNode = menu?.kind === 'node' ? nodes.find((node) => node.id === menu.id) ?? null : null;
+    const editorNode = editorNodeId ? nodes.find((node) => node.id === editorNodeId) ?? null : null;
     const linkCandidates = useMemo(() => {
         if (!menu || menu.kind !== 'add-edge') {
             return [];
@@ -917,46 +845,52 @@ export default function Welcome() {
                     />
                     <BotActionsContext.Provider value={{ onStart: handleStartBot, onStop: handleStopBot }}>
                         <AddEdgeMenuContext.Provider value={{ onOpenAddMenu: handleOpenAddMenu }}>
-                            <main className="relative flex-1">
-                                <NodeContextMenu
-                                    menu={menu}
-                                    currentNode={currentNode}
-                                    linkCandidates={linkCandidates}
-                                    createTemplates={filteredCreateTemplates}
-                                    linkSearch={linkSearch}
-                                    onLinkSearchChange={(value) => setLinkSearch(value)}
-                                    onLinkToNode={handleLinkToNode}
-                                    onCreateAndLink={handleCreateAndLink}
-                                    onEditCommand={handleEditCommand}
-                                    onEditMessage={handleEditMessage}
-                                    onEditButtonText={handleEditButtonText}
-                                    onEditImageList={handleEditImageList}
-                                    onEditBotToken={handleEditBotToken}
-                                    onDeleteNode={handleDeleteNode}
-                                    onDeleteEdge={handleDeleteEdge}
-                                />
-                                <ReactFlow
-                                    nodes={nodes}
-                                    edges={edges}
-                                    nodeTypes={nodeTypes}
-                                    onNodesChange={handleNodesChange}
-                                    onEdgesChange={handleEdgesChange}
-                                    onConnect={onConnect}
-                                    onConnectStart={handleConnectStart}
-                                    onConnectEnd={handleConnectEnd}
-                                    onPaneClick={handlePaneClick}
-                                    onNodeContextMenu={handleNodeContextMenu}
-                                    onEdgeContextMenu={handleEdgeContextMenu}
-                                    connectionLineType={ConnectionLineType.Bezier}
-                                    defaultEdgeOptions={{ type: 'bezier', style: { strokeWidth: 2.5 } }}
-                                    fitView
-                                >
-                                    <Background gap={20} size={1} color="#e2e8f0" />
-                                    <Controls />
-                                </ReactFlow>
-                            </main>
+                            <GraphActionsContext.Provider
+                                value={{
+                                    onEditNode: handleEditNode,
+                                    onDeleteNode: handleDeleteNodeById,
+                                    onDeleteEdge: handleDeleteEdgeById,
+                                }}
+                            >
+                                <main className="relative flex-1">
+                                    <NodeContextMenu
+                                        menu={menu}
+                                        linkCandidates={linkCandidates}
+                                        createTemplates={filteredCreateTemplates}
+                                        linkSearch={linkSearch}
+                                        onLinkSearchChange={(value) => setLinkSearch(value)}
+                                        onLinkToNode={handleLinkToNode}
+                                        onCreateAndLink={handleCreateAndLink}
+                                    />
+                                    <ReactFlow
+                                        nodes={nodes}
+                                        edges={edges}
+                                        nodeTypes={nodeTypes}
+                                        edgeTypes={edgeTypes}
+                                        onNodesChange={handleNodesChange}
+                                        onEdgesChange={handleEdgesChange}
+                                        onConnect={onConnect}
+                                        onConnectStart={handleConnectStart}
+                                        onConnectEnd={handleConnectEnd}
+                                        onPaneClick={handlePaneClick}
+                                        connectionLineType={ConnectionLineType.Bezier}
+                                        defaultEdgeOptions={{ type: 'deletable', style: { strokeWidth: 2.5 } }}
+                                        fitView
+                                    >
+                                        <Background gap={20} size={1} color="#e2e8f0" />
+                                        <Controls />
+                                    </ReactFlow>
+                                </main>
+                            </GraphActionsContext.Provider>
                         </AddEdgeMenuContext.Provider>
                     </BotActionsContext.Provider>
+                    <NodeEditorPanel
+                        node={editorNode}
+                        values={editorValues}
+                        onChange={setEditorValues}
+                        onSave={handleSaveEditor}
+                        onClose={closeEditor}
+                    />
                 </div>
                 <input
                     ref={fileInputRef}

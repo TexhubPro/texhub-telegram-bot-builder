@@ -3,6 +3,7 @@ import { useContext } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { AddEdgeMenuContext } from './add-edge-context';
 import { BotActionsContext } from './bot-actions-context';
+import { NodeActionButtons } from './node-action-buttons';
 import type { NodeData } from '../types';
 import { PlayIcon, PlusIcon, StopIcon } from '../ui/icons';
 import { maskToken } from '../utils';
@@ -12,6 +13,7 @@ export function BotNode({ data, id }: NodeProps<NodeData>) {
     const { onOpenAddMenu } = useContext(AddEdgeMenuContext);
     return (
         <div className="relative rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 shadow-[0_12px_30px_rgba(16,185,129,0.2)]">
+            <NodeActionButtons nodeId={id} canEdit={false} />
             <div className="flex min-w-[180px] items-start justify-between gap-3">
                 <div>
                     <div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Telegram Bot</div>

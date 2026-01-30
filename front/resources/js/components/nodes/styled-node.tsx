@@ -1,6 +1,7 @@
 import { useContext } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { AddEdgeMenuContext } from './add-edge-context';
+import { NodeActionButtons } from './node-action-buttons';
 import type { NodeData } from '../types';
 import { PlusIcon } from '../ui/icons';
 
@@ -16,6 +17,7 @@ export function StyledNode({ data, id }: NodeProps<NodeData>) {
                 position={Position.Left}
                 style={{ width: 14, height: 14, borderWidth: 2, background: '#0f172a' }}
             />
+            <NodeActionButtons nodeId={id} canEdit={false} />
             <div className="min-w-[120px]">{data.label}</div>
             <Handle
                 type="source"
