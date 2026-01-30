@@ -14,6 +14,7 @@ from aiogram import Dispatcher
 from aiogram.filters import Command
 from aiogram.types import (
     CallbackQuery,
+    CopyTextButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputMediaAudio,
@@ -24,6 +25,7 @@ from aiogram.types import (
     Message,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
+    WebAppInfo,
     FSInputFile,
 )
 from fastapi import FastAPI, HTTPException, UploadFile, File
@@ -549,16 +551,45 @@ def build_reply_markup(flow: Flow, content_node_id: str):
         if edge.get("source") == content_node_id
     )
 
+    def build_inline_button(btn: dict) -> Optional[InlineKeyboardButton]:
+        data = btn.get("data", {})
+        text = (data.get("buttonText") or data.get("label") or "").strip()
+        if not text:
+            return None
+        action = (data.get("buttonAction") or "callback").strip()
+        if action == "url":
+            url = (data.get("buttonUrl") or "").strip()
+            if url:
+                return InlineKeyboardButton(text=text, url=url)
+        elif action == "web_app":
+            url = (data.get("buttonWebAppUrl") or "").strip()
+            if url:
+                return InlineKeyboardButton(text=text, web_app=WebAppInfo(url=url))
+        elif action == "copy":
+            copy_text = (data.get("buttonCopyText") or "").strip()
+            if copy_text:
+                return InlineKeyboardButton(text=text, copy_text=CopyTextButton(text=copy_text))
+        return InlineKeyboardButton(text=text, callback_data=f"btn:{btn.get('id') or ''}"[:64])
+
+    def build_reply_button(btn: dict) -> Optional[KeyboardButton]:
+        data = btn.get("data", {})
+        text = (data.get("buttonText") or data.get("label") or "").strip()
+        if not text:
+            return None
+        action = (data.get("replyAction") or "text").strip()
+        if action == "web_app":
+            url = (data.get("replyWebAppUrl") or "").strip()
+            if url:
+                return KeyboardButton(text=text, web_app=WebAppInfo(url=url))
+        return KeyboardButton(text=text)
+
     if inline_rows:
         return InlineKeyboardMarkup(
             inline_keyboard=[
                 [
-                    InlineKeyboardButton(
-                        text=(btn.get("data", {}).get("buttonText") or btn.get("data", {}).get("label") or "").strip(),
-                        callback_data=f"btn:{btn.get('id') or ''}"[:64],
-                    )
+                    inline_btn
                     for btn in row
-                    if (btn.get("data", {}).get("buttonText") or btn.get("data", {}).get("label") or "").strip()
+                    if (inline_btn := build_inline_button(btn)) is not None
                 ]
                 for row in inline_rows
             ]
@@ -571,11 +602,9 @@ def build_reply_markup(flow: Flow, content_node_id: str):
         return ReplyKeyboardMarkup(
             keyboard=[
                 [
-                    KeyboardButton(
-                        text=(btn.get("data", {}).get("buttonText") or btn.get("data", {}).get("label") or "").strip()
-                    )
+                    reply_btn
                     for btn in row
-                    if (btn.get("data", {}).get("buttonText") or btn.get("data", {}).get("label") or "").strip()
+                    if (reply_btn := build_reply_button(btn)) is not None
                 ]
                 for row in reply_rows
             ],

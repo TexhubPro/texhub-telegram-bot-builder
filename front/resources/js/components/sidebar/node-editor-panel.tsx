@@ -11,6 +11,12 @@ type Values = {
     commandText: string;
     messageText: string;
     buttonText: string;
+    buttonAction: string;
+    buttonUrl: string;
+    buttonWebAppUrl: string;
+    buttonCopyText: string;
+    replyAction: string;
+    replyWebAppUrl: string;
     imageUrls: string[];
     imageFiles: File[];
     timerSeconds: string;
@@ -123,13 +129,91 @@ export function NodeEditorPanel({ node, values, chatOptions, onChange, onSave, o
                                     placeholder="Текст ответа"
                                 />
                             ) : null}
-                            {kind === 'message_button' || kind === 'reply_button' ? (
-                                <FieldInput
-                                    label="Текст кнопки"
-                                    value={values.buttonText}
-                                    onChange={(value) => onChange({ ...values, buttonText: value })}
-                                    placeholder="Кнопка"
-                                />
+                            {kind === 'message_button' ? (
+                                <div className="flex flex-col gap-3">
+                                    <FieldInput
+                                        label="Текст кнопки"
+                                        value={values.buttonText}
+                                        onChange={(value) => onChange({ ...values, buttonText: value })}
+                                        placeholder="Кнопка"
+                                    />
+                                    <div className="flex flex-col gap-2">
+                                        <label className="block text-xs font-semibold text-slate-600">Тип кнопки</label>
+                                        <select
+                                            value={values.buttonAction}
+                                            onChange={(event) =>
+                                                onChange({
+                                                    ...values,
+                                                    buttonAction: event.target.value,
+                                                })
+                                            }
+                                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                                        >
+                                            <option value="callback">Обычная (callback)</option>
+                                            <option value="url">Ссылка</option>
+                                            <option value="web_app">WebView / Mini App</option>
+                                            <option value="copy">Копировать</option>
+                                        </select>
+                                    </div>
+                                    {values.buttonAction === 'url' ? (
+                                        <FieldInput
+                                            label="Ссылка"
+                                            value={values.buttonUrl}
+                                            onChange={(value) => onChange({ ...values, buttonUrl: value })}
+                                            placeholder="https://example.com"
+                                        />
+                                    ) : null}
+                                    {values.buttonAction === 'web_app' ? (
+                                        <FieldInput
+                                            label="WebApp ссылка"
+                                            value={values.buttonWebAppUrl}
+                                            onChange={(value) => onChange({ ...values, buttonWebAppUrl: value })}
+                                            placeholder="https://your-miniapp"
+                                        />
+                                    ) : null}
+                                    {values.buttonAction === 'copy' ? (
+                                        <FieldInput
+                                            label="Текст для копирования"
+                                            value={values.buttonCopyText}
+                                            onChange={(value) => onChange({ ...values, buttonCopyText: value })}
+                                            placeholder="Код или текст"
+                                        />
+                                    ) : null}
+                                </div>
+                            ) : null}
+                            {kind === 'reply_button' ? (
+                                <div className="flex flex-col gap-3">
+                                    <FieldInput
+                                        label="Текст кнопки"
+                                        value={values.buttonText}
+                                        onChange={(value) => onChange({ ...values, buttonText: value })}
+                                        placeholder="Кнопка"
+                                    />
+                                    <div className="flex flex-col gap-2">
+                                        <label className="block text-xs font-semibold text-slate-600">Тип кнопки</label>
+                                        <select
+                                            value={values.replyAction}
+                                            onChange={(event) =>
+                                                onChange({
+                                                    ...values,
+                                                    replyAction: event.target.value,
+                                                })
+                                            }
+                                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                                        >
+                                            <option value="text">Обычная</option>
+                                            <option value="web_app">Открыть mini app</option>
+                                        </select>
+                                    </div>
+                                    {values.replyAction === 'web_app' ? (
+                                        <FieldInput
+                                            label="WebApp ссылка"
+                                            value={values.replyWebAppUrl}
+                                            onChange={(value) => onChange({ ...values, replyWebAppUrl: value })}
+                                            placeholder="https://your-miniapp"
+                                        />
+                                    ) : null}
+                                </div>
                             ) : null}
                             {kind === 'timer' ? (
                                 <FieldInput

@@ -30,6 +30,12 @@ export type NodeData = {
     commandText?: string;
     messageText?: string;
     buttonText?: string;
+    buttonAction?: 'callback' | 'url' | 'web_app' | 'copy';
+    buttonUrl?: string;
+    buttonWebAppUrl?: string;
+    buttonCopyText?: string;
+    replyAction?: 'text' | 'web_app';
+    replyWebAppUrl?: string;
     imageUrls?: string[];
     videoUrls?: string[];
     audioUrls?: string[];

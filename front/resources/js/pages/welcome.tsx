@@ -178,6 +178,12 @@ const buildEditorValues = (node: Node<NodeData>) => {
         commandText: node.data.commandText ?? '',
         messageText: node.data.messageText ?? '',
         buttonText: node.data.buttonText ?? '',
+        buttonAction: node.data.buttonAction ?? 'callback',
+        buttonUrl: node.data.buttonUrl ?? '',
+        buttonWebAppUrl: node.data.buttonWebAppUrl ?? '',
+        buttonCopyText: node.data.buttonCopyText ?? '',
+        replyAction: node.data.replyAction ?? 'text',
+        replyWebAppUrl: node.data.replyWebAppUrl ?? '',
         imageUrls: node.data.imageUrls ?? [],
         imageFiles: [] as File[],
         videoUrls: node.data.videoUrls ?? [],
@@ -212,6 +218,12 @@ export default function Welcome() {
         commandText: '',
         messageText: '',
         buttonText: '',
+        buttonAction: 'callback',
+        buttonUrl: '',
+        buttonWebAppUrl: '',
+        buttonCopyText: '',
+        replyAction: 'text',
+        replyWebAppUrl: '',
         imageUrls: [] as string[],
         imageFiles: [] as File[],
         videoUrls: [] as string[],
@@ -508,7 +520,15 @@ export default function Welcome() {
             id: generateId('message_button'),
             type: 'message_button',
             position: { x: 520, y: 220 },
-            data: { label: 'Message Button', kind: 'message_button', buttonText: 'Кнопка' },
+            data: {
+                label: 'Message Button',
+                kind: 'message_button',
+                buttonText: 'Кнопка',
+                buttonAction: 'callback',
+                buttonUrl: '',
+                buttonWebAppUrl: '',
+                buttonCopyText: '',
+            },
         });
     }, [addNodeAndEdit, generateId]);
 
@@ -517,7 +537,13 @@ export default function Welcome() {
             id: generateId('reply_button'),
             type: 'reply_button',
             position: { x: 520, y: 260 },
-            data: { label: 'Reply Button', kind: 'reply_button', buttonText: 'Кнопка' },
+            data: {
+                label: 'Reply Button',
+                kind: 'reply_button',
+                buttonText: 'Кнопка',
+                replyAction: 'text',
+                replyWebAppUrl: '',
+            },
         });
     }, [addNodeAndEdit, generateId]);
 
@@ -626,7 +652,15 @@ export default function Welcome() {
                     id: generateId('message_button'),
                     type: 'message_button',
                     position,
-                    data: { label: 'Message Button', kind: 'message_button', buttonText: 'Кнопка' },
+                    data: {
+                        label: 'Message Button',
+                        kind: 'message_button',
+                        buttonText: 'Кнопка',
+                        buttonAction: 'callback',
+                        buttonUrl: '',
+                        buttonWebAppUrl: '',
+                        buttonCopyText: '',
+                    },
                 };
             }
 
@@ -635,7 +669,13 @@ export default function Welcome() {
                     id: generateId('reply_button'),
                     type: 'reply_button',
                     position,
-                    data: { label: 'Reply Button', kind: 'reply_button', buttonText: 'Кнопка' },
+                    data: {
+                        label: 'Reply Button',
+                        kind: 'reply_button',
+                        buttonText: 'Кнопка',
+                        replyAction: 'text',
+                        replyWebAppUrl: '',
+                    },
                 };
             }
 
@@ -848,8 +888,29 @@ export default function Welcome() {
                     if (kind === 'message') {
                         return { ...node, data: { ...node.data, messageText: editorValues.messageText } };
                     }
-                    if (kind === 'message_button' || kind === 'reply_button') {
-                        return { ...node, data: { ...node.data, buttonText: editorValues.buttonText } };
+                    if (kind === 'message_button') {
+                        return {
+                            ...node,
+                            data: {
+                                ...node.data,
+                                buttonText: editorValues.buttonText,
+                                buttonAction: editorValues.buttonAction,
+                                buttonUrl: editorValues.buttonUrl.trim(),
+                                buttonWebAppUrl: editorValues.buttonWebAppUrl.trim(),
+                                buttonCopyText: editorValues.buttonCopyText,
+                            },
+                        };
+                    }
+                    if (kind === 'reply_button') {
+                        return {
+                            ...node,
+                            data: {
+                                ...node.data,
+                                buttonText: editorValues.buttonText,
+                                replyAction: editorValues.replyAction,
+                                replyWebAppUrl: editorValues.replyWebAppUrl.trim(),
+                            },
+                        };
                     }
                     if (kind === 'timer') {
                         const parsed = Number(editorValues.timerSeconds);
