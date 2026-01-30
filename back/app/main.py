@@ -409,8 +409,6 @@ def collect_content_targets_with_delay(
                 if target_id and target_id not in seen_targets:
                     seen_targets.add(target_id)
                     results.append((target_node, delay))
-                if kind in ("delete_message", "edit_message"):
-                    queue.append((target_node.get("id") or "", delay))
             elif kind == "timer":
                 next_delay = delay + parse_timer_seconds(target_node)
                 queue.append((target_node.get("id") or "", next_delay))
@@ -699,17 +697,48 @@ async def send_content_node(flow: Flow, message: Message, target_node: dict) -> 
         except Exception:
             pass
         return
-    if kind == "edit_message":
-        text = (payload.get("editMessageText") or "").strip()
-        if not text:
-            return
-        try:
-            if message.photo or message.video or message.document or message.audio:
-                await message.edit_caption(text, reply_markup=message.reply_markup)
-            else:
-                await message.edit_text(text, reply_markup=message.reply_markup)
-        except Exception:
-            pass
+    is_edit = kind == "edit_message"
+    if kind == "message" or is_edit:
+        if is_edit:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+        message_text = (payload.get("editMessageText") if is_edit else payload.get("messageText") or "").strip()
+        image_urls = collect_image_urls(flow, target_node.get("id") or "")
+        video_urls = collect_video_urls(flow, target_node.get("id") or "")
+        audio_urls = collect_audio_urls(flow, target_node.get("id") or "")
+        document_urls = collect_document_urls(flow, target_node.get("id") or "")
+        reply_markup = build_reply_markup(flow, target_node.get("id") or "")
+        caption_used = False
+        reply_used = False
+        if image_urls:
+            caption = message_text if message_text and not caption_used else ""
+            await send_images(message, image_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+            if caption:
+                caption_used = True
+                reply_used = True
+        if video_urls:
+            caption = message_text if message_text and not caption_used else ""
+            await send_videos(message, video_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+            if caption:
+                caption_used = True
+                reply_used = True
+        if audio_urls:
+            caption = message_text if message_text and not caption_used else ""
+            await send_audios(message, audio_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+            if caption:
+                caption_used = True
+                reply_used = True
+        if document_urls:
+            caption = message_text if message_text and not caption_used else ""
+            await send_documents(message, document_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+            if caption:
+                caption_used = True
+                reply_used = True
+        if not (image_urls or video_urls or audio_urls or document_urls):
+            if message_text:
+                await message.answer(message_text, reply_markup=reply_markup)
         return
     if kind == "image":
         urls = payload.get("imageUrls") or []
