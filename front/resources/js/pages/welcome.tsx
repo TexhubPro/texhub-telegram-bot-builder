@@ -845,17 +845,20 @@ export default function Welcome() {
         const levels = Array.from(groups.keys()).sort((a, b) => a - b);
         const START_X = 80;
         const START_Y = 80;
-        const X_GAP = 260;
-        const Y_GAP = 140;
+        const X_GAP = 120;
+        const Y_GAP = 40;
         const positionById = new Map<string, { x: number; y: number }>();
+        let currentX = START_X;
         levels.forEach((level) => {
-            const bucket = groups.get(level) ?? [];
-            bucket.forEach((node, index) => {
-                positionById.set(node.id, {
-                    x: START_X + level * X_GAP,
-                    y: START_Y + index * Y_GAP,
-                });
+            const bucket = (groups.get(level) ?? []).slice().sort((a, b) => a.position.y - b.position.y);
+            const maxWidth = bucket.reduce((max, node) => Math.max(max, node.width ?? 200), 200);
+            let currentY = START_Y;
+            bucket.forEach((node) => {
+                const height = node.height ?? 120;
+                positionById.set(node.id, { x: currentX, y: currentY });
+                currentY += height + Y_GAP;
             });
+            currentX += maxWidth + X_GAP;
         });
         setNodes((nds) =>
             nds.map((node) => {
