@@ -18,9 +18,11 @@ from aiogram.types import (
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
 )
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="Bot Builder API")
@@ -34,6 +36,10 @@ app.add_middleware(
 )
 
 DB_PATH = os.getenv("BOT_DB", "bot_builder.db")
+UPLOAD_DIR = os.getenv("BOT_UPLOADS", "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 
 class Flow(BaseModel):
@@ -247,6 +253,11 @@ def collect_button_rows(flow: Flow, content_node_id: str) -> Tuple[List[List[dic
 def build_reply_markup(flow: Flow, content_node_id: str):
     nodes_by_id = {node.get("id"): node for node in flow.nodes}
     inline_rows, reply_rows = collect_button_rows(flow, content_node_id)
+    has_clear = any(
+        nodes_by_id.get(edge.get("target"), {}).get("data", {}).get("kind") == "reply_clear"
+        for edge in flow.edges
+        if edge.get("source") == content_node_id
+    )
 
     if inline_rows:
         return InlineKeyboardMarkup(
@@ -262,6 +273,9 @@ def build_reply_markup(flow: Flow, content_node_id: str):
                 for row in inline_rows
             ]
         )
+
+    if has_clear:
+        return ReplyKeyboardRemove(remove_keyboard=True)
 
     if reply_rows:
         return ReplyKeyboardMarkup(
@@ -279,6 +293,20 @@ def build_reply_markup(flow: Flow, content_node_id: str):
         )
 
     return None
+
+
+@app.post("/uploads/images")
+async def upload_images(files: List[UploadFile] = File(...)) -> dict:
+    urls: List[str] = []
+    for upload in files:
+        ext = os.path.splitext(upload.filename or "")[1].lower() or ".jpg"
+        name = f"{uuid.uuid4().hex}{ext}"
+        path = os.path.join(UPLOAD_DIR, name)
+        content = await upload.read()
+        with open(path, "wb") as file_obj:
+            file_obj.write(content)
+        urls.append(f"/uploads/{name}")
+    return {"urls": urls}
 
 
 def collect_image_urls(flow: Flow, source_id: str) -> List[str]:

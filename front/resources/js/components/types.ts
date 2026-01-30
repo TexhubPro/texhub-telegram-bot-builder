@@ -4,6 +4,7 @@ export type NodeKind =
     | 'message'
     | 'message_button'
     | 'reply_button'
+    | 'reply_clear'
     | 'button_row'
     | 'image'
     | 'node';

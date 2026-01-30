@@ -23,6 +23,7 @@ import { GraphActionsContext } from '../components/nodes/graph-actions-context';
 import { ImageNode } from '../components/nodes/image-node';
 import { MessageButtonNode } from '../components/nodes/message-button-node';
 import { MessageNode } from '../components/nodes/message-node';
+import { ReplyClearNode } from '../components/nodes/reply-clear-node';
 import { ReplyButtonNode } from '../components/nodes/reply-button-node';
 import { StyledNode } from '../components/nodes/styled-node';
 import { NodeEditorPanel } from '../components/sidebar/node-editor-panel';
@@ -41,6 +42,7 @@ const NODE_KIND_LABELS: Record<NodeKind, string> = {
     message: 'Сообщение',
     message_button: 'Message Button',
     reply_button: 'Reply Button',
+    reply_clear: 'Clear Reply',
     button_row: 'Rows',
     image: 'Изображения',
     node: 'Блок',
@@ -83,7 +85,8 @@ const buildEditorValues = (node: Node<NodeData>) => ({
     commandText: node.data.commandText ?? '',
     messageText: node.data.messageText ?? '',
     buttonText: node.data.buttonText ?? '',
-    imageUrls: (node.data.imageUrls ?? []).join('\n'),
+    imageUrls: node.data.imageUrls ?? [],
+    imageFiles: [] as File[],
 });
 
 export default function Welcome() {
@@ -99,7 +102,8 @@ export default function Welcome() {
         commandText: '',
         messageText: '',
         buttonText: '',
-        imageUrls: '',
+        imageUrls: [] as string[],
+        imageFiles: [] as File[],
     });
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const saveTimerRef = useRef<number | null>(null);
@@ -113,6 +117,7 @@ export default function Welcome() {
             message: MessageNode,
             message_button: MessageButtonNode,
             reply_button: ReplyButtonNode,
+            reply_clear: ReplyClearNode,
             button_row: ButtonRowNode,
             image: ImageNode,
             bot: BotNode,
@@ -237,6 +242,15 @@ export default function Welcome() {
             type: 'button_row',
             position: { x: 520, y: 200 },
             data: { label: 'Row', kind: 'button_row' },
+        });
+    }, [addNode, generateId]);
+
+    const handleAddReplyClearNode = useCallback(() => {
+        addNode({
+            id: generateId('reply-clear'),
+            type: 'reply_clear',
+            position: { x: 520, y: 240 },
+            data: { label: 'Clear Reply', kind: 'reply_clear' },
         });
     }, [addNode, generateId]);
 
@@ -393,6 +407,15 @@ export default function Welcome() {
                 };
             }
 
+            if (templateKey === 'reply_clear') {
+                newNode = {
+                    id: generateId('reply-clear'),
+                    type: 'reply_clear',
+                    position,
+                    data: { label: 'Clear Reply', kind: 'reply_clear' },
+                };
+            }
+
             if (templateKey === 'image') {
                 newNode = {
                     id: generateId('image'),
@@ -418,7 +441,7 @@ export default function Welcome() {
                     eds
                 )
             );
-            if (newNode.data.kind !== 'button_row') {
+            if (newNode.data.kind !== 'button_row' && newNode.data.kind !== 'reply_clear') {
                 setEditorNodeId(newNode.id);
                 setEditorValues(buildEditorValues(newNode));
             }
@@ -448,33 +471,63 @@ export default function Welcome() {
         if (!editorNodeId) {
             return;
         }
-        setNodes((nds) =>
-            nds.map((node) => {
-                if (node.id !== editorNodeId) {
+        const uploadImages = async (files: File[]) => {
+            if (!files.length) {
+                return [];
+            }
+            const form = new FormData();
+            files.forEach((file) => form.append('files', file));
+            const response = await fetch(`${API_BASE}/uploads/images`, {
+                method: 'POST',
+                body: form,
+            });
+            if (!response.ok) {
+                return [];
+            }
+            const payload = (await response.json()) as { urls?: string[] };
+            const urls = payload.urls ?? [];
+            return urls.map((url) => (url.startsWith('http') ? url : `${API_BASE}${url}`));
+        };
+
+        const save = async () => {
+            setNodes((nds) =>
+                nds.map((node) => {
+                    if (node.id !== editorNodeId) {
+                        return node;
+                    }
+                    const kind = node.data.kind;
+                    if (kind === 'command') {
+                        return { ...node, data: { ...node.data, commandText: editorValues.commandText } };
+                    }
+                    if (kind === 'message') {
+                        return { ...node, data: { ...node.data, messageText: editorValues.messageText } };
+                    }
+                    if (kind === 'message_button' || kind === 'reply_button') {
+                        return { ...node, data: { ...node.data, buttonText: editorValues.buttonText } };
+                    }
                     return node;
-                }
-                const kind = node.data.kind;
-                if (kind === 'command') {
-                    return { ...node, data: { ...node.data, commandText: editorValues.commandText } };
-                }
-                if (kind === 'message') {
-                    return { ...node, data: { ...node.data, messageText: editorValues.messageText } };
-                }
-                if (kind === 'message_button' || kind === 'reply_button') {
-                    return { ...node, data: { ...node.data, buttonText: editorValues.buttonText } };
-                }
-                if (kind === 'image') {
-                    const imageUrls = editorValues.imageUrls
-                        .split(/[\n,]+/g)
-                        .map((item) => item.trim())
-                        .filter(Boolean);
-                    return { ...node, data: { ...node.data, imageUrls } };
-                }
-                return node;
-            })
-        );
-        closeEditor();
-    }, [closeEditor, editorNodeId, editorValues, setNodes]);
+                })
+            );
+
+            const node = nodes.find((item) => item.id === editorNodeId);
+            if (node?.data.kind === 'image') {
+                const uploaded = await uploadImages(editorValues.imageFiles);
+                setNodes((nds) =>
+                    nds.map((item) => {
+                        if (item.id !== editorNodeId) {
+                            return item;
+                        }
+                        const merged = [...(editorValues.imageUrls ?? []), ...uploaded];
+                        return { ...item, data: { ...item.data, imageUrls: merged } };
+                    })
+                );
+                setEditorValues((prev) => ({ ...prev, imageFiles: [], imageUrls: [...prev.imageUrls, ...uploaded] }));
+            }
+            closeEditor();
+        };
+
+        save().catch(() => closeEditor());
+    }, [closeEditor, editorNodeId, editorValues, nodes, setNodes]);
 
     const handleEditNode = useCallback(
         (nodeId: string) => {
@@ -703,6 +756,7 @@ export default function Welcome() {
                         node.data.kind === 'message_button' ||
                         node.data.kind === 'reply_button' ||
                         node.data.kind === 'button_row' ||
+                        node.data.kind === 'reply_clear' ||
                         node.data.kind === 'image'
                 );
             }
@@ -721,7 +775,8 @@ export default function Welcome() {
                     (node) =>
                         node.data.kind === 'message_button' ||
                         node.data.kind === 'reply_button' ||
-                        node.data.kind === 'button_row'
+                        node.data.kind === 'button_row' ||
+                        node.data.kind === 'reply_clear'
                 );
             }
             if (sourceKind === 'button_row') {
@@ -749,6 +804,7 @@ export default function Welcome() {
             { key: 'button_row', label: 'Rows', description: 'Строка кнопок' },
             { key: 'message_button', label: 'Message Button', description: 'Инлайн кнопка' },
             { key: 'reply_button', label: 'Reply Button', description: 'Ответная кнопка' },
+            { key: 'reply_clear', label: 'Clear Reply', description: 'Очистить reply-кнопки' },
             { key: 'image', label: 'Изображения', description: 'Один или больше файлов' },
         ],
         []
@@ -764,6 +820,7 @@ export default function Welcome() {
                     item.key === 'message_button' ||
                     item.key === 'reply_button' ||
                     item.key === 'button_row' ||
+                    item.key === 'reply_clear' ||
                     item.key === 'image'
             );
         }
@@ -776,7 +833,10 @@ export default function Welcome() {
         if (sourceKind === 'image') {
             templates = createTemplates.filter(
                 (item) =>
-                    item.key === 'message_button' || item.key === 'reply_button' || item.key === 'button_row'
+                    item.key === 'message_button' ||
+                    item.key === 'reply_button' ||
+                    item.key === 'button_row' ||
+                    item.key === 'reply_clear'
             );
         }
         if (sourceKind === 'button_row') {
@@ -798,6 +858,7 @@ export default function Welcome() {
             { key: 'button_row', label: 'Rows', description: 'Строка кнопок', action: handleAddRowNode },
             { key: 'message_button', label: 'Message Button', description: 'Инлайн кнопка', action: handleAddMessageButtonNode },
             { key: 'reply_button', label: 'Reply Button', description: 'Ответная кнопка', action: handleAddReplyButtonNode },
+            { key: 'reply_clear', label: 'Clear Reply', description: 'Очистить reply-кнопки', action: handleAddReplyClearNode },
             { key: 'image', label: 'Изображения', description: 'Один или больше файлов', action: handleAddImageNode },
             { key: 'bot', label: 'Бот', description: 'Токен и статус', action: handleAddBot },
         ],
@@ -808,6 +869,7 @@ export default function Welcome() {
             handleAddRowNode,
             handleAddMessageButtonNode,
             handleAddReplyButtonNode,
+            handleAddReplyClearNode,
             handleAddImageNode,
         ]
     );

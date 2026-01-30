@@ -3,12 +3,14 @@ import type { Node } from 'reactflow';
 import type { NodeData, NodeKind } from '../types';
 import { FieldInput } from '../ui/field-input';
 import { FieldTextarea } from '../ui/field-textarea';
+import { ImageFileInput } from '../ui/image-file-input';
 
 type Values = {
     commandText: string;
     messageText: string;
     buttonText: string;
-    imageUrls: string;
+    imageUrls: string[];
+    imageFiles: File[];
 };
 
 type Props = {
@@ -85,19 +87,41 @@ export function NodeEditorPanel({ node, values, onChange, onSave, onClose }: Pro
                                     placeholder="Кнопка"
                                 />
                             ) : null}
-                            {kind === 'image' ? (
-                                <FieldTextarea
-                                    label="Ссылки на изображения"
-                                    value={values.imageUrls}
-                                    onChange={(value) => onChange({ ...values, imageUrls: value })}
-                                    placeholder="https://..."
-                                />
+                    {kind === 'image' ? (
+                        <div className="flex flex-col gap-3">
+                            <ImageFileInput
+                                label="Добавить изображения"
+                                onChange={(files) =>
+                                    onChange({ ...values, imageFiles: [...values.imageFiles, ...files] })
+                                }
+                            />
+                            {values.imageUrls.length || values.imageFiles.length ? (
+                                <div className="grid grid-cols-3 gap-2">
+                                    {values.imageUrls.map((url) => (
+                                        <img
+                                            key={url}
+                                            src={url}
+                                            alt="preview"
+                                            className="h-16 w-20 rounded-md object-cover"
+                                        />
+                                    ))}
+                                    {values.imageFiles.map((file) => (
+                                        <img
+                                            key={`${file.name}-${file.lastModified}`}
+                                            src={URL.createObjectURL(file)}
+                                            alt="preview"
+                                            className="h-16 w-20 rounded-md object-cover"
+                                        />
+                                    ))}
+                                </div>
                             ) : null}
                         </div>
+                    ) : null}
+                            <Button color="primary" onPress={onSave}>
+                                Сохранить
+                            </Button>
+                        </div>
                     </div>
-                    <Button color="primary" onPress={onSave}>
-                        Сохранить
-                    </Button>
                 </CardBody>
             </Card>
         </aside>
