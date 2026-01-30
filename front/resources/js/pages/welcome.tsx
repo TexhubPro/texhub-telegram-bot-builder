@@ -981,6 +981,13 @@ export default function Welcome() {
         );
     }, [edges, nodes, setNodes]);
 
+    const handleClearFlow = useCallback(() => {
+        setNodes((nds) => nds.filter((node) => node.data.kind === 'bot'));
+        setEdges([]);
+        setMenu(null);
+        setEditorNodeId(null);
+    }, [setEdges, setNodes]);
+
 
     const handleStartBot = useCallback(async () => {
         if (!bot) {
@@ -1533,6 +1540,7 @@ export default function Welcome() {
                 <AppNavbar
                     onSave={handleSaveFlow}
                     onSort={handleSortLayout}
+                    onClear={handleClearFlow}
                     onExport={handleExport}
                     onImport={handleImportClick}
                 />
