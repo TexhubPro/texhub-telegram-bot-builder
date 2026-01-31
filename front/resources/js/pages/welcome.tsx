@@ -18,7 +18,6 @@ import { AddEdgeMenuContext } from '../components/nodes/add-edge-context';
 import { BotActionsContext } from '../components/nodes/bot-actions-context';
 import { BotNode } from '../components/nodes/bot-node';
 import { ButtonRowNode } from '../components/nodes/button-row-node';
-import { BroadcastNode } from '../components/nodes/broadcast-node';
 import { CommandNode } from '../components/nodes/command-node';
 import { ConditionNode } from '../components/nodes/condition-node';
 import { NodeContextMenu } from '../components/nodes/context-menu';
@@ -38,7 +37,6 @@ import { RecordNode } from '../components/nodes/record-node';
 import { ReplyClearNode } from '../components/nodes/reply-clear-node';
 import { ReplyButtonNode } from '../components/nodes/reply-button-node';
 import { StyledNode } from '../components/nodes/styled-node';
-import { TaskNode } from '../components/nodes/task-node';
 import { TextFileNode } from '../components/nodes/text-file-node';
 import { TimerNode } from '../components/nodes/timer-node';
 import { StatusGetNode } from '../components/nodes/status-get-node';
@@ -46,10 +44,11 @@ import { StatusSetNode } from '../components/nodes/status-set-node';
 import { SubscriptionNode } from '../components/nodes/subscription-node';
 import { VideoNode } from '../components/nodes/video-node';
 import { WebhookNode } from '../components/nodes/webhook-node';
+import { PluginNode } from '../components/nodes/plugin-node';
 import { NodeEditorPanel } from '../components/sidebar/node-editor-panel';
 import { Sidebar } from '../components/sidebar/sidebar';
 import { DeletableEdge } from '../components/edges/deletable-edge';
-import type { Bot, ContextMenu, NodeData, NodeKind } from '../components/types';
+import type { Bot, ContextMenu, NodeData, NodeKind, PluginDefinition, PluginNodeDefinition } from '../components/types';
 
 const API_BASE = (import.meta.env.VITE_API_BASE ?? 'https://toocars.tj').replace(/\/+$/, '');
 
@@ -72,8 +71,6 @@ const NODE_KIND_LABELS: Record<NodeKind, string> = {
     chat: 'Чат',
     status_set: 'Статус',
     status_get: 'Статус',
-    task: 'Задача',
-    broadcast: 'Рассылка',
     record: 'Запись',
     excel_file: 'Excel файл',
     text_file: 'TXT файл',
@@ -82,9 +79,22 @@ const NODE_KIND_LABELS: Record<NodeKind, string> = {
     subscription: 'Подписка',
     webhook: 'Вебхук',
     condition: 'Проверка',
+    plugin: 'Интеграция',
     button_row: 'Rows',
     image: 'Изображения',
     node: 'Блок',
+};
+
+const filterDeprecatedFlow = (
+    nodes: Node<NodeData>[] = [],
+    edges: Edge[] = []
+): { nodes: Node<NodeData>[]; edges: Edge[] } => {
+    const filteredNodes = nodes.filter(
+        (node) => node.data.kind !== 'task' && node.data.kind !== 'broadcast'
+    );
+    const allowed = new Set(filteredNodes.map((node) => node.id));
+    const filteredEdges = edges.filter((edge) => allowed.has(edge.source) && allowed.has(edge.target));
+    return { nodes: filteredNodes, edges: filteredEdges };
 };
 
 const getNodeTitle = (node: Node<NodeData>) => {
@@ -132,18 +142,6 @@ const getNodeTitle = (node: Node<NodeData>) => {
         }
         case 'status_get':
             return 'Получить статус';
-        case 'task': {
-            const schedule = node.data.taskScheduleType ?? 'interval';
-            if (schedule === 'daily') {
-                return node.data.taskDailyTime ? `Задача: ${node.data.taskDailyTime}` : 'Задача ежедневно';
-            }
-            if (schedule === 'datetime') {
-                return node.data.taskRunAt ? `Задача: ${node.data.taskRunAt}` : 'Задача разово';
-            }
-            return 'Задача по интервалу';
-        }
-        case 'broadcast':
-            return 'Рассылка';
         case 'record':
             return 'Запись';
         case 'excel_file':
@@ -169,12 +167,19 @@ const getNodeTitle = (node: Node<NodeData>) => {
             const seconds = typeof raw === 'number' ? raw : Number(raw) || 0;
             return `Таймер ${seconds} сек`;
         }
+        case 'plugin':
+            return node.data.pluginTitle ?? node.data.label;
         default:
             return node.data.label;
     }
 };
 
-const getNodeSubtitle = (node: Node<NodeData>) => NODE_KIND_LABELS[node.data.kind ?? 'node'];
+const getNodeSubtitle = (node: Node<NodeData>) => {
+    if (node.data.kind === 'plugin') {
+        return node.data.pluginSubtitle ?? node.data.pluginKind ?? 'Интеграция';
+    }
+    return NODE_KIND_LABELS[node.data.kind ?? 'node'];
+};
 
 const getClientPosition = (event: MouseEvent | TouchEvent) => {
     if ('changedTouches' in event && event.changedTouches.length > 0) {
@@ -231,11 +236,6 @@ const buildEditorValues = (node: Node<NodeData>) => {
         replyWebAppUrl: node.data.replyWebAppUrl ?? '',
         subscriptionChatId:
             node.data.subscriptionChatId !== undefined ? String(node.data.subscriptionChatId) : '',
-        taskScheduleType: node.data.taskScheduleType ?? 'interval',
-        taskIntervalMinutes:
-            node.data.taskIntervalMinutes !== undefined ? String(node.data.taskIntervalMinutes) : '60',
-        taskDailyTime: node.data.taskDailyTime ?? '10:00',
-        taskRunAt: node.data.taskRunAt ?? '',
         recordField: node.data.recordField ?? 'text',
         fileName: node.data.fileName ?? '',
         columnName: node.data.columnName ?? '',
@@ -259,6 +259,7 @@ const buildEditorValues = (node: Node<NodeData>) => {
         conditionLengthValue:
             node.data.conditionLengthValue !== undefined ? String(node.data.conditionLengthValue) : '',
         timerSeconds: node.data.timerSeconds !== undefined ? String(node.data.timerSeconds) : '',
+        pluginValues: node.data.pluginValues ?? {},
     };
 };
 
@@ -274,6 +275,7 @@ export default function Welcome() {
     const [editorNodeId, setEditorNodeId] = useState<string | null>(null);
     const [chatOptions, setChatOptions] = useState<{ id: number; label: string }[]>([]);
     const [subscriptionOptions, setSubscriptionOptions] = useState<{ id: number; label: string }[]>([]);
+    const [plugins, setPlugins] = useState<PluginDefinition[]>([]);
     const [editorValues, setEditorValues] = useState({
         commandText: '',
         messageText: '',
@@ -285,10 +287,6 @@ export default function Welcome() {
         replyAction: 'text',
         replyWebAppUrl: '',
         subscriptionChatId: '',
-        taskScheduleType: 'interval',
-        taskIntervalMinutes: '60',
-        taskDailyTime: '10:00',
-        taskRunAt: '',
         recordField: 'text',
         fileName: '',
         columnName: '',
@@ -311,6 +309,7 @@ export default function Welcome() {
         conditionLengthOp: '',
         conditionLengthValue: '',
         timerSeconds: '',
+        pluginValues: {} as Record<string, string | number | boolean>,
     });
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const connectSourceRef = useRef<string | null>(null);
@@ -333,8 +332,6 @@ export default function Welcome() {
             chat: ChatNode,
             status_set: StatusSetNode,
             status_get: StatusGetNode,
-            task: TaskNode,
-            broadcast: BroadcastNode,
             record: RecordNode,
             excel_file: ExcelFileNode,
             text_file: TextFileNode,
@@ -349,6 +346,7 @@ export default function Welcome() {
             button_row: ButtonRowNode,
             image: ImageNode,
             bot: BotNode,
+            plugin: PluginNode,
         }),
         []
     );
@@ -550,31 +548,6 @@ export default function Welcome() {
         });
     }, [addNode, generateId]);
 
-    const handleAddTaskNode = useCallback(() => {
-        addNodeAndEdit({
-            id: generateId('task'),
-            type: 'task',
-            position: { x: 220, y: 220 },
-            data: {
-                label: 'Задача',
-                kind: 'task',
-                taskScheduleType: 'interval',
-                taskIntervalMinutes: 60,
-                taskDailyTime: '10:00',
-                taskRunAt: '',
-            },
-        });
-    }, [addNodeAndEdit, generateId]);
-
-    const handleAddBroadcastNode = useCallback(() => {
-        addNode({
-            id: generateId('broadcast'),
-            type: 'broadcast',
-            position: { x: 520, y: 220 },
-            data: { label: 'Рассылка', kind: 'broadcast' },
-        });
-    }, [addNode, generateId]);
-
     const handleAddRecordNode = useCallback(() => {
         addNodeAndEdit({
             id: generateId('record'),
@@ -692,6 +665,39 @@ export default function Welcome() {
             data: { label: 'Подписка', kind: 'subscription', subscriptionChatId: undefined, subscriptionChatTitle: '' },
         });
     }, [addNodeAndEdit, generateId]);
+
+    const handleAddPluginNode = useCallback(
+        (definition: PluginNodeDefinition & { pluginId?: string }) => {
+            const pluginValues: Record<string, string | number | boolean> = {};
+            (definition.inputs ?? []).forEach((field) => {
+                if (field.default !== undefined) {
+                    pluginValues[field.key] = field.default;
+                } else if (field.type === 'checkbox') {
+                    pluginValues[field.key] = false;
+                } else {
+                    pluginValues[field.key] = '';
+                }
+            });
+            addNodeAndEdit({
+                id: generateId(definition.kind || 'plugin'),
+                type: 'plugin',
+                position: { x: 520, y: 220 },
+                data: {
+                    label: definition.title || 'Интеграция',
+                    kind: 'plugin',
+                    pluginId: definition.pluginId,
+                    pluginKind: definition.kind,
+                    pluginTitle: definition.title,
+                    pluginSubtitle: definition.subtitle,
+                    pluginColor: definition.color,
+                    pluginInputs: definition.inputs ?? [],
+                    pluginOutputs: definition.outputs ?? [],
+                    pluginValues,
+                },
+            });
+        },
+        [addNodeAndEdit, generateId]
+    );
 
     const handleAddMessageButtonNode = useCallback(() => {
         addNodeAndEdit({
@@ -1006,31 +1012,6 @@ export default function Welcome() {
                 };
             }
 
-            if (templateKey === 'task') {
-                newNode = {
-                    id: generateId('task'),
-                    type: 'task',
-                    position,
-                    data: {
-                        label: 'Задача',
-                        kind: 'task',
-                        taskScheduleType: 'interval',
-                        taskIntervalMinutes: 60,
-                        taskDailyTime: '10:00',
-                        taskRunAt: '',
-                    },
-                };
-            }
-
-            if (templateKey === 'broadcast') {
-                newNode = {
-                    id: generateId('broadcast'),
-                    type: 'broadcast',
-                    position,
-                    data: { label: 'Рассылка', kind: 'broadcast' },
-                };
-            }
-
             if (templateKey === 'record') {
                 newNode = {
                     id: generateId('record'),
@@ -1227,22 +1208,6 @@ export default function Welcome() {
                     if (kind === 'status_set') {
                         return { ...node, data: { ...node.data, statusValue: editorValues.statusValue.trim() } };
                     }
-                    if (kind === 'task') {
-                        const scheduleType = editorValues.taskScheduleType || 'interval';
-                        const intervalValue = Number(editorValues.taskIntervalMinutes);
-                        const intervalMinutes = Number.isFinite(intervalValue) && intervalValue > 0 ? intervalValue : 60;
-                        const dailyTime = editorValues.taskDailyTime || '10:00';
-                        return {
-                            ...node,
-                            data: {
-                                ...node.data,
-                                taskScheduleType: scheduleType,
-                                taskIntervalMinutes: intervalMinutes,
-                                taskDailyTime: dailyTime,
-                                taskRunAt: editorValues.taskRunAt || '',
-                            },
-                        };
-                    }
                     if (kind === 'record') {
                         return { ...node, data: { ...node.data, recordField: editorValues.recordField } };
                     }
@@ -1286,6 +1251,15 @@ export default function Welcome() {
                                 conditionType: normalizedType,
                                 conditionLengthOp: editorValues.conditionLengthOp,
                                 conditionLengthValue: Number.isFinite(lengthValue) ? Math.max(0, lengthValue) : undefined,
+                            },
+                        };
+                    }
+                    if (kind === 'plugin') {
+                        return {
+                            ...node,
+                            data: {
+                                ...node.data,
+                                pluginValues: editorValues.pluginValues,
                             },
                         };
                     }
@@ -1536,7 +1510,6 @@ export default function Welcome() {
                         target.data.kind === 'timer' ||
                         target.data.kind === 'condition' ||
                         target.data.kind === 'subscription' ||
-                        target.data.kind === 'broadcast' ||
                         target.data.kind === 'record' ||
                         target.data.kind === 'excel_file' ||
                         target.data.kind === 'text_file' ||
@@ -1610,8 +1583,9 @@ export default function Welcome() {
                 flow?: { nodes?: Node<NodeData>[]; edges?: Edge[] };
             };
             if (parsed.flow?.nodes && parsed.flow?.edges) {
-                setNodes(parsed.flow.nodes);
-                setEdges(parsed.flow.edges);
+                const filtered = filterDeprecatedFlow(parsed.flow.nodes, parsed.flow.edges);
+                setNodes(filtered.nodes);
+                setEdges(filtered.edges);
             }
             if (parsed.bot && bot) {
                 const response = await fetch(`${API_BASE}/bots/${bot.id}`, {
@@ -1671,8 +1645,9 @@ export default function Welcome() {
             }
             window.localStorage.setItem('botId', currentBot.id);
             setBot(currentBot);
-            setNodes(currentBot.flow.nodes ?? []);
-            setEdges(currentBot.flow.edges ?? []);
+            const filtered = filterDeprecatedFlow(currentBot.flow.nodes ?? [], currentBot.flow.edges ?? []);
+            setNodes(filtered.nodes);
+            setEdges(filtered.edges);
             applyBotToNode(currentBot);
             setIsHydrating(false);
         };
@@ -1703,8 +1678,6 @@ export default function Welcome() {
                     node.data.kind === 'webhook' ||
                     node.data.kind === 'condition' ||
                     node.data.kind === 'subscription' ||
-                    node.data.kind === 'task' ||
-                    node.data.kind === 'broadcast' ||
                     node.data.kind === 'record' ||
                     node.data.kind === 'excel_file' ||
                     node.data.kind === 'text_file' ||
@@ -1779,6 +1752,25 @@ export default function Welcome() {
             isMounted = false;
         };
     }, [bot, editorNode]);
+
+    useEffect(() => {
+        let isMounted = true;
+        fetch(`${API_BASE}/plugins`)
+            .then((response) => (response.ok ? response.json() : Promise.reject()))
+            .then((payload: PluginDefinition[]) => {
+                if (isMounted) {
+                    setPlugins(Array.isArray(payload) ? payload : []);
+                }
+            })
+            .catch(() => {
+                if (isMounted) {
+                    setPlugins([]);
+                }
+            });
+        return () => {
+            isMounted = false;
+        };
+    }, []);
     const linkCandidates = useMemo(() => {
         if (!menu || menu.kind !== 'add-edge') {
             return [];
@@ -1801,8 +1793,6 @@ export default function Welcome() {
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'subscription' ||
-                        node.data.kind === 'task' ||
-                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'record' ||
                         node.data.kind === 'excel_file' ||
                         node.data.kind === 'excel_column' ||
@@ -1827,8 +1817,6 @@ export default function Welcome() {
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'subscription' ||
-                        node.data.kind === 'task' ||
-                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'record' ||
                         node.data.kind === 'excel_file' ||
                         node.data.kind === 'excel_column' ||
@@ -1851,8 +1839,6 @@ export default function Welcome() {
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'subscription' ||
-                        node.data.kind === 'task' ||
-                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'record' ||
                         node.data.kind === 'excel_file' ||
                         node.data.kind === 'excel_column' ||
@@ -1870,8 +1856,6 @@ export default function Welcome() {
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'subscription' ||
-                        node.data.kind === 'task' ||
-                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'record' ||
                         node.data.kind === 'excel_file' ||
                         node.data.kind === 'excel_column' ||
@@ -1899,8 +1883,6 @@ export default function Welcome() {
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'subscription' ||
-                        node.data.kind === 'task' ||
-                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'record' ||
                         node.data.kind === 'excel_file' ||
                         node.data.kind === 'excel_column' ||
@@ -1921,8 +1903,6 @@ export default function Welcome() {
                         node.data.kind === 'audio' ||
                         node.data.kind === 'document' ||
                         node.data.kind === 'subscription' ||
-                        node.data.kind === 'task' ||
-                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'record' ||
                         node.data.kind === 'excel_file' ||
                         node.data.kind === 'excel_column' ||
@@ -1954,8 +1934,6 @@ export default function Welcome() {
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'subscription' ||
-                        node.data.kind === 'task' ||
-                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'record' ||
                         node.data.kind === 'excel_file' ||
                         node.data.kind === 'excel_column' ||
@@ -1972,8 +1950,6 @@ export default function Welcome() {
                         node.data.kind === 'audio' ||
                         node.data.kind === 'document' ||
                         node.data.kind === 'subscription' ||
-                        node.data.kind === 'task' ||
-                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'record' ||
                         node.data.kind === 'excel_file' ||
                         node.data.kind === 'excel_column' ||
@@ -1994,8 +1970,6 @@ export default function Welcome() {
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'subscription' ||
-                        node.data.kind === 'task' ||
-                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'record' ||
                         node.data.kind === 'excel_file' ||
                         node.data.kind === 'excel_column' ||
@@ -2018,8 +1992,6 @@ export default function Welcome() {
                         node.data.kind === 'delete_message' ||
                         node.data.kind === 'edit_message' ||
                         node.data.kind === 'subscription' ||
-                        node.data.kind === 'task' ||
-                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'record' ||
                         node.data.kind === 'excel_file' ||
                         node.data.kind === 'excel_column' ||
@@ -2041,18 +2013,15 @@ export default function Welcome() {
                         node.data.kind === 'status_set' ||
                         node.data.kind === 'status_get' ||
                         node.data.kind === 'timer' ||
-                        node.data.kind === 'task' ||
-                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'record' ||
                         node.data.kind === 'excel_file' ||
                         node.data.kind === 'excel_column' ||
                         node.data.kind === 'text_file'
                 );
             }
-            if (sourceKind === 'task') {
+            if (sourceKind === 'delete_message') {
                 candidates = candidates.filter(
                     (node) =>
-                        node.data.kind === 'broadcast' ||
                         node.data.kind === 'condition' ||
                         node.data.kind === 'subscription' ||
                         node.data.kind === 'record' ||
@@ -2072,7 +2041,7 @@ export default function Welcome() {
                         node.data.kind === 'timer'
                 );
             }
-            if (sourceKind === 'broadcast') {
+            if (sourceKind === 'edit_message') {
                 candidates = candidates.filter(
                     (node) =>
                         node.data.kind === 'condition' ||
@@ -2188,6 +2157,17 @@ export default function Welcome() {
                     (node) => node.data.kind === 'message_button' || node.data.kind === 'reply_button'
                 );
             }
+            if (sourceKind !== 'plugin') {
+                const pluginCandidates = nodes.filter(
+                    (node) => node.data.kind === 'plugin' && node.id !== menu.id && !connectedTargets.has(node.id)
+                );
+                const existing = new Set(candidates.map((node) => node.id));
+                pluginCandidates.forEach((node) => {
+                    if (!existing.has(node.id)) {
+                        candidates.push(node);
+                    }
+                });
+            }
             const items = candidates
                 .map((node) => ({
                     id: node.id,
@@ -2200,6 +2180,32 @@ export default function Welcome() {
         const needle = linkSearch.toLowerCase();
         return items.filter((item) => `${item.title} ${item.subtitle}`.toLowerCase().includes(needle));
     }, [menu, nodes, edges, linkSearch]);
+
+    const pluginNodes = useMemo(() => {
+        const items: Array<PluginNodeDefinition & { pluginId: string }> = [];
+        plugins.forEach((plugin) => {
+            (plugin.nodes ?? []).forEach((node) => {
+                items.push({
+                    ...node,
+                    pluginId: plugin.id,
+                    group: node.group ?? plugin.name ?? 'Интеграции',
+                });
+            });
+        });
+        return items;
+    }, [plugins]);
+
+    const pluginTemplates = useMemo(
+        () =>
+            pluginNodes.map((node) => ({
+                key: `plugin:${node.pluginId}:${node.kind}`,
+                label: node.title,
+                description: node.subtitle ?? node.kind,
+                action: () => handleAddPluginNode(node),
+                group: node.group ?? 'Интеграции',
+            })),
+        [handleAddPluginNode, pluginNodes]
+    );
 
     const createTemplates = useMemo(
         () => [
@@ -2215,8 +2221,6 @@ export default function Welcome() {
             { key: 'chat', label: 'Чат', description: 'Отправить другому пользователю' },
             { key: 'status_set', label: 'Статус', description: 'Установить статус пользователя' },
             { key: 'status_get', label: 'Статус', description: 'Получить статус пользователя' },
-            { key: 'task', label: 'Задача', description: 'Расписание отправки' },
-            { key: 'broadcast', label: 'Рассылка', description: 'Отправить всем' },
             { key: 'record', label: 'Запись', description: 'Сохранить данные' },
             { key: 'excel_file', label: 'Excel файл', description: 'Файл для записей' },
             { key: 'excel_column', label: 'Excel столбец', description: 'Колонка для записи' },
@@ -2254,8 +2258,6 @@ export default function Welcome() {
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
                     item.key === 'subscription' ||
-                    item.key === 'task' ||
-                    item.key === 'broadcast' ||
                     item.key === 'record' ||
                     item.key === 'excel_file' ||
                     item.key === 'excel_column' ||
@@ -2280,8 +2282,6 @@ export default function Welcome() {
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
                     item.key === 'subscription' ||
-                    item.key === 'task' ||
-                    item.key === 'broadcast' ||
                     item.key === 'record' ||
                     item.key === 'excel_file' ||
                     item.key === 'excel_column' ||
@@ -2300,8 +2300,6 @@ export default function Welcome() {
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
                     item.key === 'subscription' ||
-                    item.key === 'task' ||
-                    item.key === 'broadcast' ||
                     item.key === 'record' ||
                     item.key === 'excel_file' ||
                     item.key === 'excel_column' ||
@@ -2329,8 +2327,6 @@ export default function Welcome() {
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
                     item.key === 'subscription' ||
-                    item.key === 'task' ||
-                    item.key === 'broadcast' ||
                     item.key === 'record' ||
                     item.key === 'excel_file' ||
                     item.key === 'excel_column' ||
@@ -2352,8 +2348,6 @@ export default function Welcome() {
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
                     item.key === 'subscription' ||
-                    item.key === 'task' ||
-                    item.key === 'broadcast' ||
                     item.key === 'record' ||
                     item.key === 'excel_file' ||
                     item.key === 'excel_column' ||
@@ -2374,8 +2368,6 @@ export default function Welcome() {
                     item.key === 'audio' ||
                     item.key === 'document' ||
                     item.key === 'subscription' ||
-                    item.key === 'task' ||
-                    item.key === 'broadcast' ||
                     item.key === 'record' ||
                     item.key === 'excel_file' ||
                     item.key === 'excel_column' ||
@@ -2407,8 +2399,6 @@ export default function Welcome() {
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
                     item.key === 'subscription' ||
-                    item.key === 'task' ||
-                    item.key === 'broadcast' ||
                     item.key === 'record' ||
                     item.key === 'excel_file' ||
                     item.key === 'excel_column' ||
@@ -2425,8 +2415,6 @@ export default function Welcome() {
                     item.key === 'audio' ||
                     item.key === 'document' ||
                     item.key === 'subscription' ||
-                    item.key === 'task' ||
-                    item.key === 'broadcast' ||
                     item.key === 'record' ||
                     item.key === 'excel_file' ||
                     item.key === 'excel_column' ||
@@ -2447,8 +2435,6 @@ export default function Welcome() {
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
                     item.key === 'subscription' ||
-                    item.key === 'task' ||
-                    item.key === 'broadcast' ||
                     item.key === 'record' ||
                     item.key === 'excel_file' ||
                     item.key === 'excel_column' ||
@@ -2471,8 +2457,6 @@ export default function Welcome() {
                     item.key === 'delete_message' ||
                     item.key === 'edit_message' ||
                     item.key === 'subscription' ||
-                    item.key === 'task' ||
-                    item.key === 'broadcast' ||
                     item.key === 'record' ||
                     item.key === 'excel_file' ||
                     item.key === 'excel_column' ||
@@ -2494,18 +2478,15 @@ export default function Welcome() {
                     item.key === 'status_set' ||
                     item.key === 'status_get' ||
                     item.key === 'timer' ||
-                    item.key === 'task' ||
-                    item.key === 'broadcast' ||
                     item.key === 'record' ||
                     item.key === 'excel_file' ||
                     item.key === 'excel_column' ||
                     item.key === 'text_file'
             );
         }
-        if (sourceKind === 'task') {
+        if (sourceKind === 'delete_message') {
             templates = createTemplates.filter(
                 (item) =>
-                    item.key === 'broadcast' ||
                     item.key === 'condition' ||
                     item.key === 'subscription' ||
                     item.key === 'record' ||
@@ -2525,7 +2506,7 @@ export default function Welcome() {
                     item.key === 'timer'
             );
         }
-        if (sourceKind === 'broadcast') {
+        if (sourceKind === 'edit_message') {
             templates = createTemplates.filter(
                 (item) =>
                     item.key === 'condition' ||
@@ -2644,12 +2625,13 @@ export default function Welcome() {
         if (hasWebhookNode) {
             templates = templates.filter((item) => item.key !== 'webhook');
         }
+        const combined = [...templates, ...pluginTemplates];
         if (!linkSearch.trim()) {
-            return templates;
+            return combined;
         }
         const needle = linkSearch.toLowerCase();
-        return templates.filter((item) => `${item.label} ${item.description}`.toLowerCase().includes(needle));
-    }, [createTemplates, linkSearch, menu, nodes, hasWebhookNode]);
+        return combined.filter((item) => `${item.label} ${item.description}`.toLowerCase().includes(needle));
+    }, [createTemplates, linkSearch, menu, nodes, hasWebhookNode, pluginTemplates]);
 
     const nodeTemplates = useMemo(
         () => [
@@ -2665,8 +2647,6 @@ export default function Welcome() {
             { key: 'chat', label: 'Чат', description: 'Отправить другому пользователю', action: handleAddChatNode },
             { key: 'status_set', label: 'Статус', description: 'Установить статус пользователя', action: handleAddStatusSetNode },
             { key: 'status_get', label: 'Статус', description: 'Получить статус пользователя', action: handleAddStatusGetNode },
-            { key: 'task', label: 'Задача', description: 'Расписание отправки', action: handleAddTaskNode },
-            { key: 'broadcast', label: 'Рассылка', description: 'Отправить всем', action: handleAddBroadcastNode },
             { key: 'record', label: 'Запись', description: 'Сохранить данные', action: handleAddRecordNode, group: 'Работа с файлом' },
             { key: 'excel_file', label: 'Excel файл', description: 'Файл для записей', action: handleAddExcelFileNode, group: 'Работа с файлом' },
             { key: 'excel_column', label: 'Excel столбец', description: 'Колонка для записи', action: handleAddExcelColumnNode, group: 'Работа с файлом' },
@@ -2680,6 +2660,7 @@ export default function Welcome() {
             { key: 'condition', label: 'Проверка', description: 'Сравнить текст', action: handleAddConditionNode },
             { key: 'subscription', label: 'Подписка', description: 'Проверка подписки', action: handleAddSubscriptionNode },
             { key: 'bot', label: 'Бот', description: 'Токен и статус', action: handleAddBot },
+            ...pluginTemplates,
         ],
         [
             handleAddBot,
@@ -2695,8 +2676,6 @@ export default function Welcome() {
             handleAddChatNode,
             handleAddStatusSetNode,
             handleAddStatusGetNode,
-            handleAddTaskNode,
-            handleAddBroadcastNode,
             handleAddRecordNode,
             handleAddExcelFileNode,
             handleAddExcelColumnNode,
@@ -2709,6 +2688,7 @@ export default function Welcome() {
             handleAddWebhookNode,
             handleAddConditionNode,
             handleAddSubscriptionNode,
+            pluginTemplates,
         ]
     );
 

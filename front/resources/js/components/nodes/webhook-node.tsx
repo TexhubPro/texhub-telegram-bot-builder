@@ -8,7 +8,7 @@ import { PlusIcon } from '../ui/icons';
 export function WebhookNode({ data, id, selected }: NodeProps<NodeData>) {
     const { onOpenAddMenu } = useContext(AddEdgeMenuContext);
     return (
-        <div className="group relative rounded-xl border-2 border-blue-500 bg-white py-2 pr-5 pl-3 text-white">
+        <div className="group relative rounded-xl border-2 border-blue-500 bg-white py-2 pr-5 pl-2 text-white">
             <NodeActionButtons nodeId={id} isVisible={selected} canEdit={false} canDuplicate={false} />
             <div className="flex items-center justify-center gap-3">
                 <svg
@@ -34,4 +34,3 @@ export function WebhookNode({ data, id, selected }: NodeProps<NodeData>) {
         </div>
     );
 }
-

@@ -34,10 +34,6 @@ type Values = {
     editMessageText: string;
     chatId: string;
     subscriptionChatId: string;
-    taskScheduleType: string;
-    taskIntervalMinutes: string;
-    taskDailyTime: string;
-    taskRunAt: string;
     recordField: string;
     fileName: string;
     columnName: string;
@@ -48,6 +44,7 @@ type Values = {
     conditionType: string;
     conditionLengthOp: string;
     conditionLengthValue: string;
+    pluginValues: Record<string, string | number | boolean>;
 };
 
 type Props = {
@@ -90,10 +87,6 @@ const getTitle = (kind?: NodeKind) => {
             return 'Статус';
         case 'subscription':
             return 'Подписка';
-        case 'task':
-            return 'Задача';
-        case 'broadcast':
-            return 'Рассылка';
         case 'record':
             return 'Запись';
         case 'excel_file':
@@ -110,6 +103,8 @@ const getTitle = (kind?: NodeKind) => {
             return 'Вебхук';
         case 'image':
             return 'Изображения';
+        case 'plugin':
+            return 'Интеграция';
         default:
             return 'Редактор';
     }
@@ -463,59 +458,6 @@ export function NodeEditorPanel({ node, values, chatOptions, subscriptionOptions
                                         placeholder="send_phone"
                                     />
                                 ) : null}
-                                {kind === 'task' ? (
-                                    <div className="flex flex-col gap-3">
-                                        <FieldSelect
-                                            label="Тип задачи"
-                                            value={values.taskScheduleType}
-                                            onChange={(value) =>
-                                                onChange({
-                                                    ...values,
-                                                    taskScheduleType: value,
-                                                })
-                                            }
-                                            options={[
-                                                { value: 'interval', label: 'Интервал' },
-                                                { value: 'daily', label: 'Каждый день' },
-                                                { value: 'datetime', label: 'Дата и время' },
-                                            ]}
-                                        />
-                                        {values.taskScheduleType === 'interval' ? (
-                                            <FieldSelect
-                                                label="Интервал"
-                                                value={values.taskIntervalMinutes}
-                                                onChange={(value) => onChange({ ...values, taskIntervalMinutes: value })}
-                                                options={[
-                                                    { value: '1', label: 'Каждую минуту' },
-                                                    { value: '5', label: 'Каждые 5 минут' },
-                                                    { value: '10', label: 'Каждые 10 минут' },
-                                                    { value: '20', label: 'Каждые 20 минут' },
-                                                    { value: '30', label: 'Каждые 30 минут' },
-                                                    { value: '60', label: 'Каждый час' },
-                                                    { value: '120', label: 'Каждые 2 часа' },
-                                                    { value: '360', label: 'Каждые 6 часов' },
-                                                    { value: '1440', label: 'Каждый день' },
-                                                ]}
-                                            />
-                                        ) : null}
-                                        {values.taskScheduleType === 'daily' ? (
-                                            <FieldInput
-                                                label="Время"
-                                                value={values.taskDailyTime}
-                                                onChange={(value) => onChange({ ...values, taskDailyTime: value })}
-                                                type="time"
-                                            />
-                                        ) : null}
-                                        {values.taskScheduleType === 'datetime' ? (
-                                            <FieldInput
-                                                label="Дата и время"
-                                                value={values.taskRunAt}
-                                                onChange={(value) => onChange({ ...values, taskRunAt: value })}
-                                                type="datetime-local"
-                                            />
-                                        ) : null}
-                                    </div>
-                                ) : null}
                                 {kind === 'condition' ? (
                                     <div className="flex flex-col gap-3">
                                         <FieldSelect
@@ -592,6 +534,85 @@ export function NodeEditorPanel({ node, values, chatOptions, subscriptionOptions
                                                 />
                                             </div>
                                         ) : null}
+                                    </div>
+                                ) : null}
+                                {kind === 'plugin' ? (
+                                    <div className="flex flex-col gap-3">
+                                        {(node.data.pluginInputs ?? []).map((field) => {
+                                            const value = values.pluginValues[field.key];
+                                            if (field.type === 'textarea') {
+                                                return (
+                                                    <FieldTextarea
+                                                        key={field.key}
+                                                        label={field.label}
+                                                        value={String(value ?? '')}
+                                                        onChange={(next) =>
+                                                            onChange({
+                                                                ...values,
+                                                                pluginValues: { ...values.pluginValues, [field.key]: next },
+                                                            })
+                                                        }
+                                                        placeholder={field.placeholder}
+                                                    />
+                                                );
+                                            }
+                                            if (field.type === 'select') {
+                                                return (
+                                                    <FieldSelect
+                                                        key={field.key}
+                                                        label={field.label}
+                                                        value={String(value ?? '')}
+                                                        onChange={(next) =>
+                                                            onChange({
+                                                                ...values,
+                                                                pluginValues: { ...values.pluginValues, [field.key]: next },
+                                                            })
+                                                        }
+                                                        options={(field.options ?? []).map((option) => ({
+                                                            value: option.value,
+                                                            label: option.label,
+                                                        }))}
+                                                        placeholder={field.placeholder}
+                                                        isClearable
+                                                    />
+                                                );
+                                            }
+                                            if (field.type === 'checkbox') {
+                                                return (
+                                                    <label key={field.key} className="flex items-center gap-2 text-sm text-slate-700">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={Boolean(value)}
+                                                            onChange={(event) =>
+                                                                onChange({
+                                                                    ...values,
+                                                                    pluginValues: {
+                                                                        ...values.pluginValues,
+                                                                        [field.key]: event.target.checked,
+                                                                    },
+                                                                })
+                                                            }
+                                                        />
+                                                        {field.label}
+                                                    </label>
+                                                );
+                                            }
+                                            return (
+                                                <FieldInput
+                                                    key={field.key}
+                                                    label={field.label}
+                                                    value={String(value ?? '')}
+                                                    onChange={(next) =>
+                                                        onChange({
+                                                            ...values,
+                                                            pluginValues: { ...values.pluginValues, [field.key]: next },
+                                                        })
+                                                    }
+                                                    placeholder={field.placeholder}
+                                                    type={field.type === 'number' ? 'number' : undefined}
+                                                />
+                                            );
+                                        })}
                                     </div>
                                 ) : null}
                                 {kind === 'image' ? (

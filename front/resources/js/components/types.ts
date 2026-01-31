@@ -14,8 +14,6 @@ export type NodeKind =
     | 'chat'
     | 'status_set'
     | 'status_get'
-    | 'task'
-    | 'broadcast'
     | 'record'
     | 'excel_file'
     | 'text_file'
@@ -26,7 +24,43 @@ export type NodeKind =
     | 'condition'
     | 'button_row'
     | 'image'
+    | 'plugin'
     | 'node';
+
+export type PluginFieldType = 'text' | 'textarea' | 'number' | 'select' | 'checkbox';
+
+export type PluginFieldOption = {
+    value: string;
+    label: string;
+};
+
+export type PluginField = {
+    key: string;
+    label: string;
+    type: PluginFieldType;
+    placeholder?: string;
+    options?: PluginFieldOption[];
+    required?: boolean;
+    default?: string | number | boolean;
+};
+
+export type PluginNodeDefinition = {
+    kind: string;
+    title: string;
+    subtitle?: string;
+    group?: string;
+    color?: string;
+    inputs?: PluginField[];
+    outputs?: string[];
+};
+
+export type PluginDefinition = {
+    id: string;
+    name: string;
+    version?: string;
+    description?: string;
+    nodes?: PluginNodeDefinition[];
+};
 
 export type NodeData = {
     label: string;
@@ -54,10 +88,6 @@ export type NodeData = {
     subscriptionChatId?: number;
     subscriptionChatTitle?: string;
     statusValue?: string;
-    taskScheduleType?: string;
-    taskIntervalMinutes?: number;
-    taskDailyTime?: string;
-    taskRunAt?: string;
     recordField?: string;
     fileName?: string;
     columnName?: string;
@@ -70,6 +100,14 @@ export type NodeData = {
     conditionLengthOp?: string;
     conditionLengthValue?: number;
     canAddChild?: boolean;
+    pluginId?: string;
+    pluginKind?: string;
+    pluginTitle?: string;
+    pluginSubtitle?: string;
+    pluginColor?: string;
+    pluginInputs?: PluginField[];
+    pluginOutputs?: string[];
+    pluginValues?: Record<string, string | number | boolean>;
 };
 
 export type Bot = {
