@@ -7,10 +7,11 @@ import os
 import re
 import sqlite3
 import uuid
+import importlib.util
 from io import BytesIO
 from datetime import datetime, time as time_value
 from urllib.parse import urlparse
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from aiogram import Bot as TelegramBot
 from aiogram import Dispatcher
@@ -50,11 +51,13 @@ app.add_middleware(
 DB_PATH = os.getenv("BOT_DB", "bot_builder.db")
 UPLOAD_DIR = os.getenv("BOT_UPLOADS", "uploads")
 FILES_DIR = os.getenv("BOT_FILES", "files")
+PLUGINS_DIR = os.getenv("BOT_PLUGINS", "plugins")
 EXCEL_DIR = os.path.join(FILES_DIR, "excel")
 TEXT_DIR = os.path.join(FILES_DIR, "text")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(EXCEL_DIR, exist_ok=True)
 os.makedirs(TEXT_DIR, exist_ok=True)
+os.makedirs(PLUGINS_DIR, exist_ok=True)
 
 
 class Flow(BaseModel):
@@ -83,6 +86,9 @@ class Bot(BaseModel):
 
 RUNNING_BOTS: Dict[str, Dict[str, object]] = {}
 FLOW_CACHE: Dict[str, Flow] = {}
+PLUGIN_CACHE: Dict[str, dict] = {}
+PLUGIN_NODE_DEFS: Dict[str, dict] = {}
+PLUGIN_HANDLERS: Dict[str, Callable] = {}
 
 
 def get_connection() -> sqlite3.Connection:
@@ -137,6 +143,79 @@ def init_db() -> None:
 
 
 init_db()
+
+
+def load_plugin_module(module_path: str, module_name: str):
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if not spec or not spec.loader:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_plugins() -> List[dict]:
+    PLUGIN_CACHE.clear()
+    PLUGIN_NODE_DEFS.clear()
+    PLUGIN_HANDLERS.clear()
+    if not os.path.exists(PLUGINS_DIR):
+        return []
+    for entry in os.listdir(PLUGINS_DIR):
+        plugin_dir = os.path.join(PLUGINS_DIR, entry)
+        if not os.path.isdir(plugin_dir):
+            continue
+        manifest_path = os.path.join(plugin_dir, "plugin.json")
+        if not os.path.exists(manifest_path):
+            continue
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as file_obj:
+                manifest = json.load(file_obj)
+        except Exception:
+            continue
+        plugin_id = (manifest.get("id") or entry).strip()
+        if not plugin_id:
+            continue
+        manifest["id"] = plugin_id
+        backend = manifest.get("backend") or {}
+        module_name = backend.get("module") or "backend.py"
+        handler_name = backend.get("handler") or "run"
+        module_path = os.path.join(plugin_dir, module_name)
+        module = None
+        if os.path.exists(module_path):
+            module = load_plugin_module(module_path, f"plugin_{plugin_id}")
+        nodes = manifest.get("nodes") or []
+        normalized_nodes = []
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            kind = (node.get("kind") or "").strip() or f"plugin_{plugin_id}"
+            node["kind"] = kind
+            handler_override = node.get("handler") or handler_name
+            if module and handler_override:
+                handler = getattr(module, handler_override, None)
+                if callable(handler):
+                    PLUGIN_HANDLERS[kind] = handler
+            PLUGIN_NODE_DEFS[kind] = node
+            normalized_nodes.append(node)
+        manifest["nodes"] = normalized_nodes
+        PLUGIN_CACHE[plugin_id] = manifest
+    return list(PLUGIN_CACHE.values())
+
+
+def get_plugins_payload() -> List[dict]:
+    plugins = load_plugins()
+    payload: List[dict] = []
+    for plugin in plugins:
+        payload.append(
+            {
+                "id": plugin.get("id"),
+                "name": plugin.get("name"),
+                "version": plugin.get("version"),
+                "description": plugin.get("description"),
+                "nodes": plugin.get("nodes") or [],
+            }
+        )
+    return payload
 
 
 @app.on_event("startup")
@@ -282,6 +361,7 @@ def list_user_entries(bot_id: str) -> List[dict]:
         }
         for row in rows
     ]
+
 
 
 def upsert_chat_row(
@@ -470,6 +550,7 @@ def render_template(
     user: Optional[object] = None,
     chat_id_override: Optional[int] = None,
     row_data: Optional[dict] = None,
+    extra_vars: Optional[dict] = None,
 ) -> str:
     if not text:
         return ""
@@ -477,7 +558,7 @@ def render_template(
     first_name = getattr(source, "first_name", "") if source else ""
     last_name = getattr(source, "last_name", "") if source else ""
     username = getattr(source, "username", "") if source else ""
-    incoming_text = (message.text or message.caption or "").strip() if message else ""
+    incoming_text = ((getattr(message, "text", "") or getattr(message, "caption", "")) or "").strip() if message else ""
     message_id = getattr(message, "message_id", "") if message else ""
     photo_id = ""
     if message and getattr(message, "photo", None):
@@ -503,7 +584,8 @@ def render_template(
     if chat_id_override is not None:
         chat_id = chat_id_override
     else:
-        chat_id = message.chat.id if message.chat else ""
+        chat = getattr(message, "chat", None)
+        chat_id = chat.id if chat else ""
     replacements = {
         "{text}": incoming_text,
         "{name}": first_name,
@@ -532,6 +614,10 @@ def render_template(
             key = match.group(1).strip().lower()
             return lower_map.get(key, "")
         result = re.sub(r"\{row\[([^\]]+)\]\}", replace_row, result)
+    if extra_vars:
+        safe_vars = {str(key): "" if value is None else str(value) for key, value in extra_vars.items()}
+        for key, value in safe_vars.items():
+            result = result.replace(f"{{var.{key}}}", value)
     return result
 
 
@@ -579,6 +665,59 @@ def parse_subscription_chat_id(node: dict) -> Optional[int]:
         value = int(raw)
     except (TypeError, ValueError):
         return None
+
+
+async def run_plugin_node(
+    node: dict,
+    message: Optional[Message],
+    telegram_bot: Optional[TelegramBot],
+    bot_id: Optional[str],
+    user_id: Optional[int],
+    chat_id: Optional[int],
+    variables: dict,
+    row_data: Optional[dict],
+) -> Tuple[Optional[str], dict]:
+    data = node.get("data", {})
+    plugin_kind = (data.get("pluginKind") or "").strip() or (data.get("kind") or "").strip()
+    handler = PLUGIN_HANDLERS.get(plugin_kind)
+    if not handler:
+        load_plugins()
+        handler = PLUGIN_HANDLERS.get(plugin_kind)
+    if not handler:
+        return None, {}
+    def render(text: str, extra: Optional[dict] = None) -> str:
+        extra_vars = {**variables, **(extra or {})}
+        if message:
+            return render_template(text, message, message.from_user, chat_id, row_data=row_data, extra_vars=extra_vars)
+        fake_message = type("Obj", (), {"chat": type("Obj", (), {"id": chat_id or 0})(), "text": ""})()
+        return render_template(text, fake_message, None, chat_id or 0, row_data=row_data, extra_vars=extra_vars)
+
+    payload = {
+        "bot_id": bot_id,
+        "user_id": user_id,
+        "chat_id": chat_id,
+        "message": message,
+        "bot": telegram_bot,
+        "node": node,
+        "values": data.get("pluginValues") or {},
+        "variables": variables,
+        "row": row_data,
+        "render": render,
+    }
+    try:
+        result = handler(payload)
+        if asyncio.iscoroutine(result):
+            result = await result
+    except Exception as exc:
+        print(f"plugin handler failed for {plugin_kind}: {exc}")
+        return "error", {}
+    if not isinstance(result, dict):
+        return None, {}
+    output = result.get("output")
+    vars_payload = result.get("vars") or {}
+    if not isinstance(vars_payload, dict):
+        vars_payload = {}
+    return output, vars_payload
     return value
 
 
@@ -790,24 +929,36 @@ async def collect_content_targets_with_delay(
     message: Message | None = None,
     bot_id: Optional[str] = None,
     user_id: Optional[int] = None,
-) -> List[Tuple[dict, float, Optional[int], Optional[dict]]]:
+) -> List[Tuple[dict, float, Optional[int], Optional[dict], Optional[dict]]]:
     nodes_by_id = {node.get("id"): node for node in flow.nodes}
-    results: List[Tuple[dict, float, Optional[int], Optional[dict]]] = []
+    results: List[Tuple[dict, float, Optional[int], Optional[dict], Optional[dict]]] = []
     seen_targets: set[tuple[str, Optional[int]]] = set()
     visited: set[tuple[str, Optional[int]]] = set()
-    queue: List[Tuple[str, float, Optional[int], Optional[str], Optional[dict], Optional[str], Optional[dict]]] = [
-        (source_id, 0.0, None, None, None, None, None)
+    queue: List[
+        Tuple[
+            str,
+            float,
+            Optional[int],
+            Optional[str],
+            Optional[dict],
+            Optional[str],
+            Optional[dict],
+            dict,
+        ]
+    ] = [
+        (source_id, 0.0, None, None, None, None, None, {})
     ]
     effective_user_id = user_id
     if effective_user_id is None and message and message.from_user:
         effective_user_id = message.from_user.id
     while queue:
-        current_id, delay, target_chat_id, record_value, file_info, column_name, row_data = queue.pop(0)
+        current_id, delay, target_chat_id, record_value, file_info, column_name, row_data, variables = queue.pop(0)
         if not current_id or (current_id, target_chat_id) in visited:
             continue
         visited.add((current_id, target_chat_id))
         current_node = nodes_by_id.get(current_id)
         current_kind = current_node.get("data", {}).get("kind") if current_node else None
+        current_output = None
         if current_kind == "record" and message:
             record_field = current_node.get("data", {}).get("recordField") or ""
             record_value = extract_record_value(message, record_field)
@@ -845,7 +996,7 @@ async def collect_content_targets_with_delay(
             search_value = ""
             if search_source == "manual" and manual_value:
                 if message:
-                    search_value = render_template(manual_value, message, message.from_user)
+                    search_value = render_template(manual_value, message, message.from_user, extra_vars=variables)
                 else:
                     search_value = manual_value
             else:
@@ -936,6 +1087,20 @@ async def collect_content_targets_with_delay(
                                     break
             file_info = resolved_file_info or file_info
             column_name = resolved_column or column_name
+        if current_kind == "plugin":
+            output, new_vars = await run_plugin_node(
+                current_node,
+                message,
+                message.bot if message else None,
+                bot_id,
+                effective_user_id,
+                target_chat_id if target_chat_id is not None else (message.chat.id if message else None),
+                variables,
+                row_data,
+            )
+            if new_vars:
+                variables = {**variables, **new_vars}
+            current_output = output
         for edge in flow.edges:
             if edge.get("source") != current_id:
                 continue
@@ -954,6 +1119,10 @@ async def collect_content_targets_with_delay(
                 expected = "true" if result else "false"
                 if handle != expected:
                     continue
+            if current_kind == "plugin" and current_output:
+                handle = edge.get("sourceHandle") or ""
+                if handle and handle != current_output:
+                    continue
             target_node = nodes_by_id.get(edge.get("target"))
             if not target_node:
                 continue
@@ -963,12 +1132,14 @@ async def collect_content_targets_with_delay(
                 key = (target_id, target_chat_id)
                 if target_id and key not in seen_targets:
                     seen_targets.add(key)
-                    results.append((target_node, delay, target_chat_id, row_data))
+                    results.append((target_node, delay, target_chat_id, row_data, variables))
             elif kind == "timer":
                 next_delay = delay + parse_timer_seconds(target_node)
-                queue.append((target_node.get("id") or "", next_delay, target_chat_id, record_value, file_info, column_name, row_data))
-            elif kind in ("condition", "subscription", "record", "excel_file", "text_file", "excel_column", "file_search", "broadcast", "task"):
-                queue.append((target_node.get("id") or "", delay, target_chat_id, record_value, file_info, column_name, row_data))
+                queue.append(
+                    (target_node.get("id") or "", next_delay, target_chat_id, record_value, file_info, column_name, row_data, dict(variables))
+                )
+            elif kind in ("condition", "subscription", "record", "excel_file", "text_file", "excel_column", "file_search", "plugin"):
+                queue.append((target_node.get("id") or "", delay, target_chat_id, record_value, file_info, column_name, row_data, dict(variables)))
             elif kind == "status_set":
                 if bot_id and effective_user_id is not None:
                     set_user_status(
@@ -976,76 +1147,12 @@ async def collect_content_targets_with_delay(
                         effective_user_id,
                         target_node.get("data", {}).get("statusValue") or "",
                     )
-                queue.append((target_node.get("id") or "", delay, target_chat_id, record_value, file_info, column_name, row_data))
+                queue.append((target_node.get("id") or "", delay, target_chat_id, record_value, file_info, column_name, row_data, dict(variables)))
             elif kind == "status_get":
-                queue.append((target_node.get("id") or "", delay, target_chat_id, record_value, file_info, column_name, row_data))
+                queue.append((target_node.get("id") or "", delay, target_chat_id, record_value, file_info, column_name, row_data, dict(variables)))
             elif kind == "chat":
-                queue.append((target_node.get("id") or "", delay, target_chat_id, record_value, file_info, column_name, row_data))
+                queue.append((target_node.get("id") or "", delay, target_chat_id, record_value, file_info, column_name, row_data, dict(variables)))
     return results
-
-
-def parse_task_interval_minutes(node: dict) -> int:
-    data = node.get("data", {})
-    raw = data.get("taskIntervalMinutes")
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        value = 60
-    if value <= 0:
-        return 60
-    return value
-
-
-def parse_task_daily_time(node: dict) -> Optional[time_value]:
-    data = node.get("data", {})
-    raw = (data.get("taskDailyTime") or "").strip()
-    if not raw:
-        return None
-    try:
-        parts = raw.split(":")
-        hour = int(parts[0])
-        minute = int(parts[1]) if len(parts) > 1 else 0
-        return time_value(hour=hour, minute=minute)
-    except (ValueError, IndexError):
-        return None
-
-
-def parse_task_run_at(node: dict) -> Optional[datetime]:
-    data = node.get("data", {})
-    raw = (data.get("taskRunAt") or "").strip()
-    if not raw:
-        return None
-    for fmt in ("%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M"):
-        try:
-            return datetime.strptime(raw, fmt)
-        except ValueError:
-            continue
-    return None
-
-
-def should_run_task(node: dict, now: datetime, last_run: Optional[datetime]) -> bool:
-    schedule_type = (node.get("data", {}).get("taskScheduleType") or "interval").strip()
-    if schedule_type == "daily":
-        daily_time = parse_task_daily_time(node)
-        if daily_time is None:
-            daily_time = time_value(hour=10, minute=0)
-        if now.time() < daily_time:
-            return False
-        if last_run is None:
-            return True
-        return last_run.date() < now.date()
-    if schedule_type == "datetime":
-        run_at = parse_task_run_at(node)
-        if not run_at:
-            return False
-        if last_run is not None:
-            return False
-        return now >= run_at
-    interval_minutes = parse_task_interval_minutes(node)
-    if last_run is None:
-        return True
-    elapsed = (now - last_run).total_seconds()
-    return elapsed >= interval_minutes * 60
 
 
 def match_condition_for_entry(node: dict, entry: dict) -> bool:
@@ -1065,31 +1172,36 @@ async def collect_scheduled_targets(
     source_id: str,
     bot_id: str,
     telegram_bot: TelegramBot,
-) -> List[Tuple[dict, float, int, Optional[dict], Optional[dict]]]:
+) -> List[Tuple[dict, float, int, Optional[dict], Optional[dict], Optional[dict]]]:
     nodes_by_id = {node.get("id"): node for node in flow.nodes}
-    results: List[Tuple[dict, float, int, Optional[dict], Optional[dict]]] = []
+    results: List[Tuple[dict, float, int, Optional[dict], Optional[dict], Optional[dict]]] = []
     user_entries = list_user_entries(bot_id)
     user_by_id = {entry["id"]: entry for entry in user_entries}
     visited: set[tuple[str, Optional[int], Optional[int]]] = set()
-    queue: List[Tuple[str, float, Optional[int], Optional[dict], Optional[str], Optional[dict], Optional[str], Optional[dict]]] = [
-        (source_id, 0.0, None, None, None, None, None, None)
+    queue: List[
+        Tuple[
+            str,
+            float,
+            Optional[int],
+            Optional[dict],
+            Optional[str],
+            Optional[dict],
+            Optional[str],
+            Optional[dict],
+            dict,
+        ]
+    ] = [
+        (source_id, 0.0, None, None, None, None, None, None, {})
     ]
     while queue:
-        current_id, delay, target_chat_id, entry, record_value, file_info, column_name, row_data = queue.pop(0)
+        current_id, delay, target_chat_id, entry, record_value, file_info, column_name, row_data, variables = queue.pop(0)
         entry_id = entry["id"] if entry else None
         if not current_id or (current_id, target_chat_id, entry_id) in visited:
             continue
         visited.add((current_id, target_chat_id, entry_id))
         current_node = nodes_by_id.get(current_id)
         current_kind = current_node.get("data", {}).get("kind") if current_node else None
-
-        if current_kind == "broadcast" and current_node:
-            for user_entry in user_entries:
-                for edge in flow.edges:
-                    if edge.get("source") != current_id:
-                        continue
-                    queue.append((edge.get("target") or "", delay, user_entry["id"], user_entry, None, file_info, column_name, row_data))
-            continue
+        current_output = None
 
         if current_kind == "record" and entry:
             record_field = current_node.get("data", {}).get("recordField") or ""
@@ -1142,7 +1254,7 @@ async def collect_scheduled_targets(
                             "last_name": entry.get("last_name"),
                         },
                     )()
-                search_value = render_template(manual_value, fake_message, user_obj, target_chat_id or 0)
+                search_value = render_template(manual_value, fake_message, user_obj, target_chat_id or 0, extra_vars=variables)
             else:
                 search_value = (record_value or "").strip()
             search_column = (payload.get("searchColumnName") or "").strip()
@@ -1204,6 +1316,20 @@ async def collect_scheduled_targets(
             file_info = resolved_file_info or file_info
             column_name = resolved_column or column_name
 
+        if current_kind == "plugin":
+            output, new_vars = await run_plugin_node(
+                current_node,
+                None,
+                telegram_bot,
+                bot_id,
+                entry["id"] if entry else None,
+                target_chat_id or (entry["id"] if entry else None),
+                variables,
+                row_data,
+            )
+            if new_vars:
+                variables = {**variables, **new_vars}
+            current_output = output
         for edge in flow.edges:
             if edge.get("source") != current_id:
                 continue
@@ -1222,27 +1348,36 @@ async def collect_scheduled_targets(
                 expected = "true" if result else "false"
                 if handle != expected:
                     continue
+            if current_kind == "plugin" and current_output:
+                handle = edge.get("sourceHandle") or ""
+                if handle and handle != current_output:
+                    continue
             target_node = nodes_by_id.get(edge.get("target"))
             if not target_node:
                 continue
             kind = target_node.get("data", {}).get("kind")
             if kind in ("message", "image", "video", "audio", "document", "delete_message", "edit_message"):
                 chat_id = target_chat_id or (entry["id"] if entry else None)
+                if chat_id is None and len(user_entries) == 1:
+                    chat_id = user_entries[0]["id"]
+                    entry = user_entries[0]
                 if chat_id is not None:
-                    results.append((target_node, delay, chat_id, entry, row_data))
+                    results.append((target_node, delay, chat_id, entry, row_data, variables))
             elif kind == "timer":
                 next_delay = delay + parse_timer_seconds(target_node)
-                queue.append((target_node.get("id") or "", next_delay, target_chat_id, entry, record_value, file_info, column_name, row_data))
-            elif kind in ("condition", "subscription", "broadcast", "record", "excel_file", "text_file", "excel_column", "file_search", "task"):
-                queue.append((target_node.get("id") or "", delay, target_chat_id, entry, record_value, file_info, column_name, row_data))
+                queue.append(
+                    (target_node.get("id") or "", next_delay, target_chat_id, entry, record_value, file_info, column_name, row_data, dict(variables))
+                )
+            elif kind in ("condition", "subscription", "record", "excel_file", "text_file", "excel_column", "file_search", "plugin"):
+                queue.append((target_node.get("id") or "", delay, target_chat_id, entry, record_value, file_info, column_name, row_data, dict(variables)))
             elif kind == "status_set":
                 if entry:
                     set_user_status(bot_id, entry["id"], target_node.get("data", {}).get("statusValue") or "")
-                queue.append((target_node.get("id") or "", delay, target_chat_id, entry, record_value, file_info, column_name, row_data))
+                queue.append((target_node.get("id") or "", delay, target_chat_id, entry, record_value, file_info, column_name, row_data, dict(variables)))
             elif kind == "status_get":
-                queue.append((target_node.get("id") or "", delay, target_chat_id, entry, record_value, file_info, column_name, row_data))
+                queue.append((target_node.get("id") or "", delay, target_chat_id, entry, record_value, file_info, column_name, row_data, dict(variables)))
             elif kind == "chat":
-                queue.append((target_node.get("id") or "", delay, target_chat_id, entry, record_value, file_info, column_name, row_data))
+                queue.append((target_node.get("id") or "", delay, target_chat_id, entry, record_value, file_info, column_name, row_data, dict(variables)))
     return results
 
 
@@ -1349,6 +1484,7 @@ async def send_content_node_to_chat(
     target_node: dict,
     entry: Optional[dict],
     row_data: Optional[dict] = None,
+    extra_vars: Optional[dict] = None,
 ) -> None:
     payload = target_node.get("data", {})
     kind = payload.get("kind")
@@ -1370,7 +1506,14 @@ async def send_content_node_to_chat(
                     "last_name": entry.get("last_name"),
                 },
             )()
-        message_text = render_template((raw_text or "").strip(), fake_message, user_obj, chat_id, row_data=row_data)
+        message_text = render_template(
+            (raw_text or "").strip(),
+            fake_message,
+            user_obj,
+            chat_id,
+            row_data=row_data,
+            extra_vars=extra_vars,
+        )
         image_urls = collect_image_urls(flow, target_node.get("id") or "")
         video_urls = collect_video_urls(flow, target_node.get("id") or "")
         audio_urls = collect_audio_urls(flow, target_node.get("id") or "")
@@ -1430,44 +1573,23 @@ async def send_content_node_to_chat(
 async def send_scheduled_targets_with_delay(
     flow: Flow,
     telegram_bot: TelegramBot,
-    targets: List[Tuple[dict, float, int, Optional[dict], Optional[dict]]],
+    targets: List[Tuple[dict, float, int, Optional[dict], Optional[dict], Optional[dict]]],
 ) -> None:
     if not targets:
         return
     ordered = sorted(targets, key=lambda item: item[1])
     elapsed = 0.0
-    for target_node, delay, chat_id, entry, row_data in ordered:
+    for target_node, delay, chat_id, entry, row_data, extra_vars in ordered:
         wait_time = delay - elapsed
         if wait_time > 0:
             await asyncio.sleep(wait_time)
             elapsed = delay
-        await send_content_node_to_chat(flow, telegram_bot, chat_id, target_node, entry, row_data)
-
-
-async def task_scheduler_loop(
-    bot: Bot,
-    telegram_bot: TelegramBot,
-    stop_event: asyncio.Event,
-    last_run_by_task: Dict[str, datetime],
-) -> None:
-    while not stop_event.is_set():
-        flow = FLOW_CACHE.get(bot.id) or bot.flow
-        now = datetime.now()
-        task_nodes = [node for node in flow.nodes if node.get("data", {}).get("kind") == "task"]
-        for task_node in task_nodes:
-            task_id = task_node.get("id") or ""
-            if not task_id:
-                continue
-            last_run = last_run_by_task.get(task_id)
-            if not should_run_task(task_node, now, last_run):
-                continue
-            targets = await collect_scheduled_targets(flow, task_id, bot.id, telegram_bot)
-            await send_scheduled_targets_with_delay(flow, telegram_bot, targets)
-            last_run_by_task[task_id] = now
         try:
-            await asyncio.wait_for(stop_event.wait(), timeout=20)
-        except asyncio.TimeoutError:
-            continue
+            await send_content_node_to_chat(flow, telegram_bot, chat_id, target_node, entry, row_data, extra_vars)
+        except Exception as exc:
+            print(f"send_content_node_to_chat failed for chat {chat_id}: {exc}")
+
+
 def find_reply_button_by_text(flow: Flow, text: str) -> Optional[dict]:
     needle = text.strip().lower()
     if not needle:
@@ -1819,6 +1941,7 @@ async def send_content_node(
     target_chat_id: Optional[int] = None,
     source_user: Optional[object] = None,
     row_data: Optional[dict] = None,
+    extra_vars: Optional[dict] = None,
 ) -> None:
     payload = target_node.get("data", {})
     kind = payload.get("kind")
@@ -1836,7 +1959,7 @@ async def send_content_node(
             except Exception:
                 pass
         raw_text = payload.get("editMessageText") if is_edit else payload.get("messageText")
-        message_text = render_template((raw_text or "").strip(), message, source_user, row_data=row_data)
+        message_text = render_template((raw_text or "").strip(), message, source_user, row_data=row_data, extra_vars=extra_vars)
         image_urls = collect_image_urls(flow, target_node.get("id") or "")
         video_urls = collect_video_urls(flow, target_node.get("id") or "")
         audio_urls = collect_audio_urls(flow, target_node.get("id") or "")
@@ -1919,7 +2042,13 @@ async def send_content_node(
         reply_markup = build_reply_markup(flow, target_node.get("id") or "")
         await send_documents(message, urls, reply_markup=reply_markup, target_chat_id=target_chat_id)
         return
-    message_text = render_template((payload.get("messageText") or "").strip(), message, source_user, row_data=row_data)
+    message_text = render_template(
+        (payload.get("messageText") or "").strip(),
+        message,
+        source_user,
+        row_data=row_data,
+        extra_vars=extra_vars,
+    )
     image_urls = collect_image_urls(flow, target_node.get("id") or "")
     video_urls = collect_video_urls(flow, target_node.get("id") or "")
     audio_urls = collect_audio_urls(flow, target_node.get("id") or "")
@@ -1986,19 +2115,22 @@ async def send_content_node(
 async def send_targets_with_delay(
     flow: Flow,
     message: Message,
-    targets: List[Tuple[dict, float, Optional[int], Optional[dict]]],
+    targets: List[Tuple[dict, float, Optional[int], Optional[dict], Optional[dict]]],
     source_user: Optional[object] = None,
 ) -> None:
     if not targets:
         return
     ordered = sorted(targets, key=lambda item: item[1])
     elapsed = 0.0
-    for target_node, delay, target_chat_id, row_data in ordered:
+    for target_node, delay, target_chat_id, row_data, extra_vars in ordered:
         wait_time = delay - elapsed
         if wait_time > 0:
             await asyncio.sleep(wait_time)
             elapsed = delay
-        await send_content_node(flow, message, target_node, target_chat_id, source_user, row_data)
+        try:
+            await send_content_node(flow, message, target_node, target_chat_id, source_user, row_data, extra_vars)
+        except Exception as exc:
+            print(f"send_content_node failed for chat {target_chat_id}: {exc}")
 
 
 async def run_bot_polling(bot: Bot) -> None:
@@ -2009,9 +2141,7 @@ async def run_bot_polling(bot: Bot) -> None:
     bot_user = await telegram_bot.get_me()
     bot_user_id = bot_user.id if bot_user else None
     chat_admin_cache: Dict[int, bool] = {}
-    last_run_by_task: Dict[str, datetime] = {}
     stop_event = asyncio.Event()
-    scheduler_task = asyncio.create_task(task_scheduler_loop(bot, telegram_bot, stop_event, last_run_by_task))
     async def handler(message: Message) -> None:
         await ensure_user_row(bot.id, message.from_user, telegram_bot)
         if bot_user_id is not None:
@@ -2087,15 +2217,13 @@ async def run_bot_polling(bot: Bot) -> None:
 
     dispatcher.callback_query()(callback_handler)
 
-    RUNNING_BOTS[bot.id] = {"task": asyncio.current_task(), "stop": stop_event, "scheduler": scheduler_task}
+    RUNNING_BOTS[bot.id] = {"task": asyncio.current_task(), "stop": stop_event}
 
     try:
         await telegram_bot.delete_webhook(drop_pending_updates=True)
         await dispatcher.start_polling(telegram_bot, stop_event=stop_event, handle_signals=False)
     finally:
         await telegram_bot.session.close()
-        if scheduler_task:
-            scheduler_task.cancel()
         RUNNING_BOTS.pop(bot.id, None)
 
 
@@ -2105,7 +2233,6 @@ async def stop_bot_task(bot_id: str) -> None:
         return
     stop_event = entry.get("stop")
     task = entry.get("task")
-    scheduler = entry.get("scheduler")
     if isinstance(stop_event, asyncio.Event):
         stop_event.set()
     if isinstance(task, asyncio.Task):
@@ -2115,11 +2242,6 @@ async def stop_bot_task(bot_id: str) -> None:
             task.cancel()
         except Exception:
             pass
-    if isinstance(scheduler, asyncio.Task):
-        try:
-            await asyncio.wait_for(scheduler, timeout=5)
-        except asyncio.TimeoutError:
-            scheduler.cancel()
         except Exception:
             pass
     RUNNING_BOTS.pop(bot_id, None)
@@ -2128,6 +2250,11 @@ async def stop_bot_task(bot_id: str) -> None:
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/plugins")
+def list_plugins() -> List[dict]:
+    return get_plugins_payload()
 
 
 @app.post("/bots", response_model=Bot)

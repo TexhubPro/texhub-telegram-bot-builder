@@ -1,0 +1,23 @@
+{
+  "id": "example",
+  "name": "Example Plugin",
+  "version": "1.0.0",
+  "description": "Пример интеграции",
+  "backend": {
+    "module": "backend.py",
+    "handler": "run"
+  },
+  "nodes": [
+    {
+      "kind": "plugin_example",
+      "title": "Example",
+      "subtitle": "Пример плагина",
+      "group": "Интеграции",
+      "color": "#E0F2FE",
+      "inputs": [
+        { "key": "text", "label": "Текст", "type": "textarea", "placeholder": "Привет, {name}" }
+      ],
+      "outputs": ["true", "false"]
+    }
+  ]
+}

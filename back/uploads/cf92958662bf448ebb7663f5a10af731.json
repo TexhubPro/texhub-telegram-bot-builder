@@ -1,0 +1,360 @@
+{
+  "bot": {
+    "id": "fa9820da-c571-48d2-8100-5bbbdd685d5d",
+    "name": "extrade",
+    "token": "7610436859:AAFuayHOCi5zpbGm8Hj2jkhP5F0CDwhVVTc",
+    "status": "running",
+    "flow": {
+      "nodes": [
+        {
+          "id": "command-3abcf1ec-42a7-4b64-9399-e779e93e63da",
+          "type": "command",
+          "position": {
+            "x": 404,
+            "y": 80
+          },
+          "data": {
+            "label": "Команда",
+            "kind": "command",
+            "commandText": "/start",
+            "canAddChild": false
+          },
+          "width": 154,
+          "height": 52,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "message-a207ef0b-a3dc-436b-b1b3-32a56ac7400a",
+          "type": "message",
+          "position": {
+            "x": 846,
+            "y": 182
+          },
+          "data": {
+            "label": "Сообщение",
+            "kind": "message",
+            "messageText": " {text}",
+            "canAddChild": true
+          },
+          "width": 120,
+          "height": 62,
+          "selected": false,
+          "positionAbsolute": {
+            "x": 784.978908045977,
+            "y": 134.5972988505747
+          },
+          "dragging": false
+        },
+        {
+          "id": "webhook-2115b541-7ffe-43c4-86cc-9c16fd1e4eea",
+          "type": "webhook",
+          "position": {
+            "x": 80,
+            "y": 188
+          },
+          "data": {
+            "label": "Вебхук",
+            "kind": "webhook",
+            "canAddChild": true
+          },
+          "width": 174,
+          "height": 60,
+          "selected": false,
+          "positionAbsolute": {
+            "x": 63.41405557202518,
+            "y": 206.9912845346783
+          },
+          "dragging": false
+        },
+        {
+          "id": "chat-65dfdf4e-ae79-4f14-aa27-de1eb94ef428",
+          "type": "chat",
+          "position": {
+            "x": 419.66991013933034,
+            "y": 365.2622250517397
+          },
+          "data": {
+            "label": "Чат",
+            "kind": "chat",
+            "chatId": 1039537210,
+            "chatTitle": "Shodmehr Texhub (@shod_texhub · ID 1039537210)",
+            "canAddChild": true
+          },
+          "width": 322,
+          "height": 82,
+          "selected": true,
+          "positionAbsolute": {
+            "x": 419.66991013933034,
+            "y": 365.2622250517397
+          },
+          "dragging": false
+        },
+        {
+          "id": "message-8e7b4137-22f9-4a34-a3dd-e2feec525e5b",
+          "type": "message",
+          "position": {
+            "x": 846,
+            "y": 80
+          },
+          "data": {
+            "label": "Сообщение",
+            "kind": "message",
+            "messageText": "Привет",
+            "canAddChild": true
+          },
+          "width": 120,
+          "height": 62
+        },
+        {
+          "id": "condition-3c114a1f-c45f-4800-afb2-0e9486d03418",
+          "type": "condition",
+          "position": {
+            "x": 80,
+            "y": 288
+          },
+          "data": {
+            "label": "Проверка",
+            "kind": "condition",
+            "conditionText": "",
+            "conditionType": "",
+            "canAddChild": true
+          },
+          "width": 204,
+          "height": 62
+        },
+        {
+          "id": "bot-fa9820da-c571-48d2-8100-5bbbdd685d5d",
+          "type": "bot",
+          "position": {
+            "x": 80,
+            "y": 80
+          },
+          "data": {
+            "label": "extrade",
+            "kind": "bot",
+            "botName": "extrade",
+            "botToken": "7610436859:AAFuayHOCi5zpbGm8Hj2jkhP5F0CDwhVVTc",
+            "botStatus": "running",
+            "canAddChild": false
+          },
+          "width": 194,
+          "height": 68
+        }
+      ],
+      "edges": [
+        {
+          "id": "edge-b8e0717b-c38b-43bd-898f-20dbe5f1de87",
+          "source": "bot-fa9820da-c571-48d2-8100-5bbbdd685d5d",
+          "target": "command-3abcf1ec-42a7-4b64-9399-e779e93e63da",
+          "type": "bezier"
+        },
+        {
+          "type": "bezier",
+          "style": {
+            "strokeWidth": 2.5
+          },
+          "source": "chat-65dfdf4e-ae79-4f14-aa27-de1eb94ef428",
+          "sourceHandle": null,
+          "target": "message-a207ef0b-a3dc-436b-b1b3-32a56ac7400a",
+          "targetHandle": null,
+          "id": "reactflow__edge-chat-65dfdf4e-ae79-4f14-aa27-de1eb94ef428-message-a207ef0b-a3dc-436b-b1b3-32a56ac7400a"
+        },
+        {
+          "type": "bezier",
+          "style": {
+            "strokeWidth": 2.5
+          },
+          "source": "webhook-2115b541-7ffe-43c4-86cc-9c16fd1e4eea",
+          "sourceHandle": null,
+          "target": "chat-65dfdf4e-ae79-4f14-aa27-de1eb94ef428",
+          "targetHandle": null,
+          "id": "reactflow__edge-webhook-2115b541-7ffe-43c4-86cc-9c16fd1e4eea-chat-65dfdf4e-ae79-4f14-aa27-de1eb94ef428",
+          "selected": false
+        },
+        {
+          "id": "edge-966270aa-7c99-4d82-9604-13d4a196be8f",
+          "source": "command-3abcf1ec-42a7-4b64-9399-e779e93e63da",
+          "target": "message-8e7b4137-22f9-4a34-a3dd-e2feec525e5b",
+          "type": "bezier"
+        }
+      ]
+    }
+  },
+  "flow": {
+    "nodes": [
+      {
+        "id": "command-3abcf1ec-42a7-4b64-9399-e779e93e63da",
+        "type": "command",
+        "position": {
+          "x": 404,
+          "y": 80
+        },
+        "data": {
+          "label": "Команда",
+          "kind": "command",
+          "commandText": "/start",
+          "canAddChild": false
+        },
+        "width": 154,
+        "height": 52,
+        "selected": false,
+        "dragging": false
+      },
+      {
+        "id": "message-a207ef0b-a3dc-436b-b1b3-32a56ac7400a",
+        "type": "message",
+        "position": {
+          "x": 846,
+          "y": 182
+        },
+        "data": {
+          "label": "Сообщение",
+          "kind": "message",
+          "messageText": " {text}",
+          "canAddChild": true
+        },
+        "width": 120,
+        "height": 62,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 784.978908045977,
+          "y": 134.5972988505747
+        },
+        "dragging": false
+      },
+      {
+        "id": "webhook-2115b541-7ffe-43c4-86cc-9c16fd1e4eea",
+        "type": "webhook",
+        "position": {
+          "x": 80,
+          "y": 188
+        },
+        "data": {
+          "label": "Вебхук",
+          "kind": "webhook",
+          "canAddChild": true
+        },
+        "width": 174,
+        "height": 60,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 63.41405557202518,
+          "y": 206.9912845346783
+        },
+        "dragging": false
+      },
+      {
+        "id": "chat-65dfdf4e-ae79-4f14-aa27-de1eb94ef428",
+        "type": "chat",
+        "position": {
+          "x": 404,
+          "y": 172
+        },
+        "data": {
+          "label": "Чат",
+          "kind": "chat",
+          "chatId": 1039537210,
+          "chatTitle": "Shodmehr Texhub (@shod_texhub · ID 1039537210)",
+          "canAddChild": true
+        },
+        "width": 322,
+        "height": 82,
+        "selected": true,
+        "positionAbsolute": {
+          "x": 419.66991013933034,
+          "y": 365.2622250517397
+        },
+        "dragging": false
+      },
+      {
+        "id": "message-8e7b4137-22f9-4a34-a3dd-e2feec525e5b",
+        "type": "message",
+        "position": {
+          "x": 846,
+          "y": 80
+        },
+        "data": {
+          "label": "Сообщение",
+          "kind": "message",
+          "messageText": "Привет",
+          "canAddChild": true
+        },
+        "width": 120,
+        "height": 62
+      },
+      {
+        "id": "condition-3c114a1f-c45f-4800-afb2-0e9486d03418",
+        "type": "condition",
+        "position": {
+          "x": 80,
+          "y": 288
+        },
+        "data": {
+          "label": "Проверка",
+          "kind": "condition",
+          "conditionText": "",
+          "conditionType": "",
+          "canAddChild": true
+        },
+        "width": 204,
+        "height": 62
+      },
+      {
+        "id": "bot-fa9820da-c571-48d2-8100-5bbbdd685d5d",
+        "type": "bot",
+        "position": {
+          "x": 80,
+          "y": 80
+        },
+        "data": {
+          "label": "extrade",
+          "kind": "bot",
+          "botName": "extrade",
+          "botToken": "7610436859:AAFuayHOCi5zpbGm8Hj2jkhP5F0CDwhVVTc",
+          "botStatus": "running",
+          "canAddChild": false
+        },
+        "width": 194,
+        "height": 68
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-b8e0717b-c38b-43bd-898f-20dbe5f1de87",
+        "source": "bot-fa9820da-c571-48d2-8100-5bbbdd685d5d",
+        "target": "command-3abcf1ec-42a7-4b64-9399-e779e93e63da",
+        "type": "bezier"
+      },
+      {
+        "type": "bezier",
+        "style": {
+          "strokeWidth": 2.5
+        },
+        "source": "chat-65dfdf4e-ae79-4f14-aa27-de1eb94ef428",
+        "sourceHandle": null,
+        "target": "message-a207ef0b-a3dc-436b-b1b3-32a56ac7400a",
+        "targetHandle": null,
+        "id": "reactflow__edge-chat-65dfdf4e-ae79-4f14-aa27-de1eb94ef428-message-a207ef0b-a3dc-436b-b1b3-32a56ac7400a"
+      },
+      {
+        "type": "bezier",
+        "style": {
+          "strokeWidth": 2.5
+        },
+        "source": "webhook-2115b541-7ffe-43c4-86cc-9c16fd1e4eea",
+        "sourceHandle": null,
+        "target": "chat-65dfdf4e-ae79-4f14-aa27-de1eb94ef428",
+        "targetHandle": null,
+        "id": "reactflow__edge-webhook-2115b541-7ffe-43c4-86cc-9c16fd1e4eea-chat-65dfdf4e-ae79-4f14-aa27-de1eb94ef428",
+        "selected": false
+      },
+      {
+        "id": "edge-966270aa-7c99-4d82-9604-13d4a196be8f",
+        "source": "command-3abcf1ec-42a7-4b64-9399-e779e93e63da",
+        "target": "message-8e7b4137-22f9-4a34-a3dd-e2feec525e5b",
+        "type": "bezier"
+      }
+    ]
+  }
+}
