@@ -1,0 +1,64 @@
+{
+  "id": "telegram-schedule",
+  "name": "Telegram Schedule",
+  "version": "1.0.0",
+  "description": "Запуск по расписанию",
+  "backend": {
+    "module": "backend.py",
+    "handler": "run"
+  },
+  "nodes": [
+    {
+      "kind": "plugin_schedule",
+      "title": "Задача",
+      "subtitle": "Запуск по расписанию",
+      "group": "Интеграции",
+      "color": "#FFF4CC",
+      "noInput": true,
+      "inputs": [
+        {
+          "key": "scheduleType",
+          "label": "Тип",
+          "type": "select",
+          "default": "interval",
+          "options": [
+            { "value": "interval", "label": "Интервал" },
+            { "value": "daily", "label": "Каждый день" },
+            { "value": "datetime", "label": "Дата и время" }
+          ]
+        },
+        {
+          "key": "intervalSeconds",
+          "label": "Интервал",
+          "type": "select",
+          "default": "60",
+          "options": [
+            { "value": "30", "label": "Каждые 30 сек" },
+            { "value": "60", "label": "Каждую минуту" },
+            { "value": "300", "label": "Каждые 5 минут" },
+            { "value": "600", "label": "Каждые 10 минут" },
+            { "value": "1200", "label": "Каждые 20 минут" },
+            { "value": "1800", "label": "Каждые 30 минут" },
+            { "value": "3600", "label": "Каждый час" },
+            { "value": "7200", "label": "Каждые 2 часа" },
+            { "value": "18000", "label": "Каждые 5 часов" },
+            { "value": "43200", "label": "Каждые 12 часов" }
+          ]
+        },
+        {
+          "key": "dailyTime",
+          "label": "Время (HH:MM)",
+          "type": "text",
+          "placeholder": "10:00"
+        },
+        {
+          "key": "runAt",
+          "label": "Дата и время",
+          "type": "text",
+          "placeholder": "2026-02-12 10:30"
+        }
+      ],
+      "outputs": ["out"]
+    }
+  ]
+}

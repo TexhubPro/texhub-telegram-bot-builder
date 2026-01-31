@@ -690,6 +690,7 @@ export default function Welcome() {
                     pluginTitle: definition.title,
                     pluginSubtitle: definition.subtitle,
                     pluginColor: definition.color,
+                    pluginNoInput: definition.noInput,
                     pluginInputs: definition.inputs ?? [],
                     pluginOutputs: definition.outputs ?? [],
                     pluginValues,

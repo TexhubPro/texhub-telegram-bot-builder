@@ -1,4 +1,4 @@
-import { useContext } from 'react';
+﻿import { useContext } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import type { NodeData } from '../types';
 import { AddEdgeMenuContext } from './add-edge-context';
@@ -15,11 +15,13 @@ export function PluginNode({ data, id, selected }: NodeProps<NodeData>) {
             className="group relative rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 shadow-[0_10px_24px_rgba(15,23,42,0.12)]"
             style={{ backgroundColor: data.pluginColor ?? data.color ?? '#FFFFFF' }}
         >
-            <Handle
-                type="target"
-                position={Position.Left}
-                style={{ width: 12, height: 12, borderWidth: 2, background: '#0f172a' }}
-            />
+            {!data.pluginNoInput ? (
+                <Handle
+                    type="target"
+                    position={Position.Left}
+                    style={{ width: 12, height: 12, borderWidth: 2, background: '#0f172a' }}
+                />
+            ) : null}
             <NodeActionButtons nodeId={id} isVisible={selected} canEdit />
             <div className="min-w-[170px]">
                 <div className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Интеграция</div>

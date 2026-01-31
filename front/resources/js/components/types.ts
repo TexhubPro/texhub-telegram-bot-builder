@@ -52,6 +52,7 @@ export type PluginNodeDefinition = {
     color?: string;
     inputs?: PluginField[];
     outputs?: string[];
+    noInput?: boolean;
 };
 
 export type PluginDefinition = {
@@ -107,6 +108,7 @@ export type NodeData = {
     pluginColor?: string;
     pluginInputs?: PluginField[];
     pluginOutputs?: string[];
+    pluginNoInput?: boolean;
     pluginValues?: Record<string, string | number | boolean>;
 };
 

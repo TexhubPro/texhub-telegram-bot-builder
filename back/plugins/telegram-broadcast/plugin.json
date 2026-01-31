@@ -1,0 +1,21 @@
+{
+  "id": "telegram-broadcast",
+  "name": "Telegram Broadcast",
+  "version": "1.0.0",
+  "description": "Рассылка сообщений всем чатам в базе",
+  "backend": {
+    "module": "backend.py",
+    "handler": "run"
+  },
+  "nodes": [
+    {
+      "kind": "plugin_broadcast",
+      "title": "Рассылка",
+      "subtitle": "Отправить всем чатам",
+      "group": "Интеграции",
+      "color": "#E6F7FF",
+      "inputs": [],
+      "outputs": ["out"]
+    }
+  ]
+}
