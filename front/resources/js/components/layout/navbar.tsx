@@ -80,8 +80,9 @@ export function AppNavbar({ onSave, onSort, onClear, onExport, onImport, logoRig
                                         onSave();
                                     }}
                                 >
-                                    ���������
+                                    Сохранить
                                 </Button>
+
                                 <Button
                                     size="sm"
                                     variant="flat"
@@ -90,8 +91,9 @@ export function AppNavbar({ onSave, onSort, onClear, onExport, onImport, logoRig
                                         onSort();
                                     }}
                                 >
-                                    �����������
+                                    Сортировать
                                 </Button>
+
                                 <Button
                                     size="sm"
                                     variant="flat"
@@ -100,8 +102,9 @@ export function AppNavbar({ onSave, onSort, onClear, onExport, onImport, logoRig
                                         onClear();
                                     }}
                                 >
-                                    ��������
+                                    Очистить
                                 </Button>
+
                                 <Button
                                     size="sm"
                                     variant="flat"
@@ -110,8 +113,9 @@ export function AppNavbar({ onSave, onSort, onClear, onExport, onImport, logoRig
                                         onExport();
                                     }}
                                 >
-                                    �������
+                                    Экспорт
                                 </Button>
+
                                 <Button
                                     size="sm"
                                     variant="flat"
@@ -120,7 +124,7 @@ export function AppNavbar({ onSave, onSort, onClear, onExport, onImport, logoRig
                                         onImport();
                                     }}
                                 >
-                                    ������
+                                    Импорт
                                 </Button>
                             </div>
                         </DrawerBody>
