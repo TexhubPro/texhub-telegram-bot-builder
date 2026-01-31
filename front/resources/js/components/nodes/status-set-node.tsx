@@ -1,11 +1,11 @@
-﻿import { useContext } from 'react';
+import { useContext } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { AddEdgeMenuContext } from './add-edge-context';
 import { NodeActionButtons } from './node-action-buttons';
 import type { NodeData } from '../types';
 import { PlusIcon } from '../ui/icons';
 
-export function StatusSetNode({ data, id }: NodeProps<NodeData>) {
+export function StatusSetNode({ data, id, selected }: NodeProps<NodeData>) {
     const { onOpenAddMenu } = useContext(AddEdgeMenuContext);
     const value = (data.statusValue || '').trim();
     return (
@@ -15,7 +15,7 @@ export function StatusSetNode({ data, id }: NodeProps<NodeData>) {
                 position={Position.Left}
                 style={{ width: 12, height: 12, borderWidth: 2, background: '#059669' }}
             />
-            <NodeActionButtons nodeId={id} canEdit />
+            <NodeActionButtons nodeId={id} isVisible={selected} canEdit />
             <div className="min-w-[170px]">
                 <div className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Статус</div>
                 <div className="text-sm font-semibold">{value || 'Установить'}</div>
@@ -40,4 +40,5 @@ export function StatusSetNode({ data, id }: NodeProps<NodeData>) {
             ) : null}
         </div>
     );
-}
+}
+

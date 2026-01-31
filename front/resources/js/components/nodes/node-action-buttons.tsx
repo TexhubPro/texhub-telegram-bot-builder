@@ -6,12 +6,16 @@ type Props = {
     nodeId: string;
     canEdit?: boolean;
     canDuplicate?: boolean;
+    isVisible?: boolean;
 };
 
-export function NodeActionButtons({ nodeId, canEdit = true, canDuplicate = true }: Props) {
+export function NodeActionButtons({ nodeId, canEdit = true, canDuplicate = true, isVisible = false }: Props) {
     const { onEditNode, onDeleteNode, onDuplicateNode } = useContext(GraphActionsContext);
+    const visibility = isVisible
+        ? 'opacity-100 pointer-events-auto'
+        : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto';
     return (
-        <div className="pointer-events-none absolute -top-[8px] right-6 z-20 flex items-center gap-1 opacity-0 transition group-hover:opacity-100 group-hover:pointer-events-auto">
+        <div className={`absolute -top-[8px] right-6 z-20 flex items-center gap-1 transition ${visibility}`}>
             {canEdit ? (
                 <button
                     type="button"

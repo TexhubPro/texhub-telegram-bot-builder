@@ -2,7 +2,7 @@ import { Handle, Position, type NodeProps } from 'reactflow';
 import { NodeActionButtons } from './node-action-buttons';
 import type { NodeData } from '../types';
 
-export function ImageNode({ data, id }: NodeProps<NodeData>) {
+export function ImageNode({ data, id, selected }: NodeProps<NodeData>) {
     const count = data.imageUrls?.length ?? 0;
     const label = count === 1 ? '1 изображение' : `${count} изображений`;
     return (
@@ -12,7 +12,7 @@ export function ImageNode({ data, id }: NodeProps<NodeData>) {
                 position={Position.Left}
                 style={{ width: 12, height: 12, borderWidth: 2, background: '#e11d48' }}
             />
-            <NodeActionButtons nodeId={id} canEdit />
+            <NodeActionButtons nodeId={id} isVisible={selected} canEdit />
             <div className="min-w-[170px]">
                 <div className="text-xs font-semibold uppercase tracking-wide text-rose-600">Изображения</div>
                 <div className="text-sm font-semibold">{count ? label : 'Нет изображений'}</div>
@@ -37,3 +37,4 @@ export function ImageNode({ data, id }: NodeProps<NodeData>) {
         </div>
     );
 }
+

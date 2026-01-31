@@ -5,7 +5,7 @@ import { NodeActionButtons } from './node-action-buttons';
 import type { NodeData } from '../types';
 import { PlusIcon } from '../ui/icons';
 
-export function StyledNode({ data, id }: NodeProps<NodeData>) {
+export function StyledNode({ data, id, selected }: NodeProps<NodeData>) {
     const { onOpenAddMenu } = useContext(AddEdgeMenuContext);
     return (
         <div
@@ -17,7 +17,7 @@ export function StyledNode({ data, id }: NodeProps<NodeData>) {
                 position={Position.Left}
                 style={{ width: 14, height: 14, borderWidth: 2, background: '#0f172a' }}
             />
-            <NodeActionButtons nodeId={id} canEdit={false} />
+            <NodeActionButtons nodeId={id} isVisible={selected} canEdit={false} />
             <div className="min-w-[120px]">{data.label}</div>
             <Handle
                 type="source"
@@ -40,3 +40,4 @@ export function StyledNode({ data, id }: NodeProps<NodeData>) {
         </div>
     );
 }
+

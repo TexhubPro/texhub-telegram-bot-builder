@@ -5,12 +5,12 @@ import { NodeActionButtons } from './node-action-buttons';
 import type { NodeData } from '../types';
 import { PlusIcon } from '../ui/icons';
 
-export function MessageNode({ data, id }: NodeProps<NodeData>) {
+export function MessageNode({ data, id, selected }: NodeProps<NodeData>) {
     const { onOpenAddMenu } = useContext(AddEdgeMenuContext);
     return (
         <div className="group relative rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-[0_12px_30px_rgba(251,191,36,0.18)]">
             <Handle type="target" position={Position.Left} style={{ width: 14, height: 14, borderWidth: 2, background: '#b45309' }} />
-            <NodeActionButtons nodeId={id} canEdit />
+            <NodeActionButtons nodeId={id} isVisible={selected} canEdit />
             <div className="max-w-96 min-w-fit">
                 <div className="text-xs font-semibold tracking-wide text-amber-700 uppercase">Сообщение</div>
                 <div className="text-sm font-semibold whitespace-break-spaces">{data.messageText ?? 'Привет'}</div>
@@ -32,3 +32,4 @@ export function MessageNode({ data, id }: NodeProps<NodeData>) {
         </div>
     );
 }
+

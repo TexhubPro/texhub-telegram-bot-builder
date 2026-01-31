@@ -14,7 +14,7 @@ const intervalLabels: Record<number, string> = {
     1440: 'Каждый день',
 };
 
-export function TaskNode({ data, id }: NodeProps<NodeData>) {
+export function TaskNode({ data, id, selected }: NodeProps<NodeData>) {
     const scheduleType = data.taskScheduleType || 'interval';
     const intervalMinutes = data.taskIntervalMinutes ?? 60;
     const dailyTime = (data.taskDailyTime || '').trim();
@@ -32,7 +32,7 @@ export function TaskNode({ data, id }: NodeProps<NodeData>) {
 
     return (
         <div className="group relative rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-[0_10px_24px_rgba(251,191,36,0.18)]">
-            <NodeActionButtons nodeId={id} canEdit />
+            <NodeActionButtons nodeId={id} isVisible={selected} canEdit />
             <div className="min-w-[200px]">
                 <div className="text-xs font-semibold tracking-wide text-amber-600 uppercase">Задача</div>
                 <div className="text-sm font-semibold">{subtitle}</div>
@@ -41,3 +41,4 @@ export function TaskNode({ data, id }: NodeProps<NodeData>) {
         </div>
     );
 }
+

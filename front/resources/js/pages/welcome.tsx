@@ -12,6 +12,7 @@ import ReactFlow, {
     useNodesState,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import { Button, Drawer, DrawerBody, DrawerContent } from '@heroui/react';
 import { AppNavbar } from '../components/layout/navbar';
 import { AddEdgeMenuContext } from '../components/nodes/add-edge-context';
 import { BotActionsContext } from '../components/nodes/bot-actions-context';
@@ -269,6 +270,7 @@ export default function Welcome() {
     const [bot, setBot] = useState<Bot | null>(null);
     const [isHydrating, setIsHydrating] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [editorNodeId, setEditorNodeId] = useState<string | null>(null);
     const [chatOptions, setChatOptions] = useState<{ id: number; label: string }[]>([]);
     const [subscriptionOptions, setSubscriptionOptions] = useState<{ id: number; label: string }[]>([]);
@@ -311,10 +313,11 @@ export default function Welcome() {
         timerSeconds: '',
     });
     const fileInputRef = useRef<HTMLInputElement | null>(null);
-    const saveTimerRef = useRef<number | null>(null);
     const connectSourceRef = useRef<string | null>(null);
     const connectSourceHandleRef = useRef<string | null>(null);
     const suppressPaneClickRef = useRef(false);
+    const hasBotNode = useMemo(() => nodes.some((node) => node.data.kind === 'bot'), [nodes]);
+    const hasWebhookNode = useMemo(() => nodes.some((node) => node.data.kind === 'webhook'), [nodes]);
 
     const nodeTypes = useMemo(
         () => ({
@@ -660,13 +663,17 @@ export default function Welcome() {
     }, [addNodeAndEdit, generateId]);
 
     const handleAddWebhookNode = useCallback(() => {
+        if (hasWebhookNode) {
+            window.alert('Вебхук уже добавлен.');
+            return;
+        }
         addNode({
             id: generateId('webhook'),
             type: 'webhook',
             position: { x: 520, y: 220 },
             data: { label: 'Вебхук', kind: 'webhook' },
         });
-    }, [addNode, generateId]);
+    }, [addNode, generateId, hasWebhookNode]);
 
     const handleAddConditionNode = useCallback(() => {
         addNodeAndEdit({
@@ -751,10 +758,11 @@ export default function Welcome() {
             return;
         }
         const token = window.prompt('Токен бота', bot.token ?? '');
+        const nextToken = token || null;
         const response = await fetch(`${API_BASE}/bots/${bot.id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, token: token || null }),
+            body: JSON.stringify({ name, token: nextToken }),
         });
         if (!response.ok) {
             return;
@@ -762,6 +770,15 @@ export default function Welcome() {
         const updated: Bot = await response.json();
         setBot(updated);
         applyBotToNode(updated);
+        if (bot.status === 'running' && (bot.token ?? null) !== nextToken) {
+            await fetch(`${API_BASE}/bots/${bot.id}/stop`, { method: 'POST' });
+            const restarted = await fetch(`${API_BASE}/bots/${bot.id}/start`, { method: 'POST' });
+            if (restarted.ok) {
+                const running: Bot = await restarted.json();
+                setBot(running);
+                applyBotToNode(running);
+            }
+        }
     }, [bot, applyBotToNode]);
 
 
@@ -793,6 +810,10 @@ export default function Welcome() {
     const handleCreateAndLink = useCallback(
         (templateKey: string) => {
             if (!menu || menu.kind !== 'add-edge') {
+                return;
+            }
+            if (templateKey === 'webhook' && hasWebhookNode) {
+                window.alert('Вебхук уже добавлен.');
                 return;
             }
             const sourceNode = nodes.find((node) => node.id === menu.id);
@@ -1089,7 +1110,7 @@ export default function Welcome() {
             }
             setMenu(null);
         },
-        [generateId, menu, nodes, setEdges, setNodes]
+        [generateId, menu, nodes, setEdges, setNodes, hasWebhookNode]
     );
 
     const handlePaneClick = useCallback(() => {
@@ -1098,6 +1119,7 @@ export default function Welcome() {
             return;
         }
         setMenu(null);
+        setIsSidebarOpen(false);
     }, []);
 
     const openEditorForNode = useCallback((node: Node<NodeData>) => {
@@ -1353,11 +1375,19 @@ export default function Welcome() {
     const handleEditNode = useCallback(
         (nodeId: string) => {
             const node = nodes.find((item) => item.id === nodeId);
-            if (node) {
-                openEditorForNode(node);
+            if (!node) {
+                return;
             }
+            if (node.data.kind === 'bot') {
+                handleAddBot();
+                return;
+            }
+            if (node.data.kind === 'webhook') {
+                return;
+            }
+            openEditorForNode(node);
         },
-        [nodes, openEditorForNode]
+        [nodes, openEditorForNode, handleAddBot]
     );
 
     const handleDeleteNodeById = useCallback(
@@ -1383,6 +1413,9 @@ export default function Welcome() {
             setNodes((nds) => {
                 const node = nds.find((item) => item.id === nodeId);
                 if (!node) {
+                    return nds;
+                }
+                if (node.data.kind === 'bot' || node.data.kind === 'webhook') {
                     return nds;
                 }
                 const clonedData = JSON.parse(JSON.stringify(node.data)) as NodeData;
@@ -1648,23 +1681,6 @@ export default function Welcome() {
             isMounted = false;
         };
     }, [applyBotToNode, setEdges, setNodes]);
-
-    useEffect(() => {
-        if (isHydrating || !bot) {
-            return undefined;
-        }
-        if (saveTimerRef.current) {
-            window.clearTimeout(saveTimerRef.current);
-        }
-        saveTimerRef.current = window.setTimeout(() => {
-            handleSaveFlow();
-        }, 800);
-        return () => {
-            if (saveTimerRef.current) {
-                window.clearTimeout(saveTimerRef.current);
-            }
-        };
-    }, [bot, nodes, edges, handleSaveFlow, isHydrating]);
 
     useEffect(() => {
         setNodes((nds) => {
@@ -2221,6 +2237,9 @@ export default function Welcome() {
         const sourceNode = menu?.kind === 'add-edge' ? nodes.find((node) => node.id === menu.id) : null;
         const sourceKind = sourceNode?.data.kind;
         let templates = createTemplates;
+        if (hasWebhookNode) {
+            templates = templates.filter((item) => item.key !== 'webhook');
+        }
         if (sourceKind === 'message') {
             templates = createTemplates.filter(
                 (item) =>
@@ -2622,12 +2641,15 @@ export default function Welcome() {
                 (item) => item.key === 'message_button' || item.key === 'reply_button'
             );
         }
+        if (hasWebhookNode) {
+            templates = templates.filter((item) => item.key !== 'webhook');
+        }
         if (!linkSearch.trim()) {
             return templates;
         }
         const needle = linkSearch.toLowerCase();
         return templates.filter((item) => `${item.label} ${item.description}`.toLowerCase().includes(needle));
-    }, [createTemplates, linkSearch, menu, nodes]);
+    }, [createTemplates, linkSearch, menu, nodes, hasWebhookNode]);
 
     const nodeTemplates = useMemo(
         () => [
@@ -2691,12 +2713,25 @@ export default function Welcome() {
     );
 
     const filteredTemplates = nodeTemplates.filter((item) => {
+        if (item.key === 'bot' && hasBotNode) {
+            return false;
+        }
+        if (item.key === 'webhook' && hasWebhookNode) {
+            return false;
+        }
         if (!searchTerm.trim()) {
             return true;
         }
         const needle = searchTerm.toLowerCase();
         return `${item.label} ${item.description}`.toLowerCase().includes(needle);
     });
+    const mobileTemplates = filteredTemplates.map((item) => ({
+        ...item,
+        action: () => {
+            item.action();
+            setIsSidebarOpen(false);
+        },
+    }));
 
     return (
         <>
@@ -2721,12 +2756,39 @@ export default function Welcome() {
                     onImport={handleImportClick}
                 />
                 <div className="flex flex-1 overflow-hidden">
-                    <Sidebar
-                        searchTerm={searchTerm}
-                        onSearchChange={setSearchTerm}
-                        templates={filteredTemplates}
-                        statusLabel={`Статус: ${bot?.status ?? 'stopped'}`}
-                    />
+                    <div className="hidden md:block">
+                        <Sidebar
+                            searchTerm={searchTerm}
+                            onSearchChange={setSearchTerm}
+                            templates={filteredTemplates}
+                            statusLabel={`Статус: ${bot?.status ?? 'stopped'}`}
+                        />
+                    </div>
+                    <div className="md:hidden">
+                        <Drawer
+                            isOpen={isSidebarOpen}
+                            placement="left"
+                            size="sm"
+                            onOpenChange={(open) => {
+                                if (!open) {
+                                    setIsSidebarOpen(false);
+                                }
+                            }}
+                        >
+                            <DrawerContent>
+                                {() => (
+                                    <DrawerBody className="p-0">
+                                        <Sidebar
+                                            searchTerm={searchTerm}
+                                            onSearchChange={setSearchTerm}
+                                            templates={mobileTemplates}
+                                            statusLabel={`Статус: ${bot?.status ?? 'stopped'}`}
+                                        />
+                                    </DrawerBody>
+                                )}
+                            </DrawerContent>
+                        </Drawer>
+                    </div>
                     <BotActionsContext.Provider value={{ onStart: handleStartBot, onStop: handleStopBot }}>
                         <AddEdgeMenuContext.Provider value={{ onOpenAddMenu: handleOpenAddMenu }}>
                             <GraphActionsContext.Provider
@@ -2739,6 +2801,15 @@ export default function Welcome() {
                                 }}
                             >
                                 <main className="relative flex-1">
+                                    <Button
+                                        size="sm"
+                                        variant="flat"
+                                        isIconOnly
+                                        className="absolute left-3 top-3 z-30 md:hidden"
+                                        onPress={() => setIsSidebarOpen(true)}
+                                    >
+                                        <span className="text-lg leading-none">≡</span>
+                                    </Button>
                                     <NodeContextMenu
                                         menu={menu}
                                         linkCandidates={linkCandidates}

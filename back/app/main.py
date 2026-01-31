@@ -139,6 +139,26 @@ def init_db() -> None:
 init_db()
 
 
+@app.on_event("startup")
+async def resume_running_bots() -> None:
+    try:
+        with get_connection() as conn:
+            rows = conn.execute("SELECT * FROM bots WHERE status = 'running'").fetchall()
+    except Exception:
+        return
+    for row in rows:
+        try:
+            bot = row_to_bot(row)
+        except Exception:
+            continue
+        if not bot.token:
+            continue
+        if bot.id in RUNNING_BOTS:
+            continue
+        FLOW_CACHE[bot.id] = bot.flow
+        asyncio.create_task(run_bot_polling(bot))
+
+
 def row_to_bot(row: sqlite3.Row) -> Bot:
     flow = json.loads(row["flow"]) if row["flow"] else {"nodes": [], "edges": []}
     return Bot(
@@ -457,17 +477,51 @@ def render_template(
     first_name = getattr(source, "first_name", "") if source else ""
     last_name = getattr(source, "last_name", "") if source else ""
     username = getattr(source, "username", "") if source else ""
+    incoming_text = (message.text or message.caption or "").strip() if message else ""
+    message_id = getattr(message, "message_id", "") if message else ""
+    photo_id = ""
+    if message and getattr(message, "photo", None):
+        try:
+            photo_id = message.photo[-1].file_id
+        except Exception:
+            photo_id = ""
+    video_id = getattr(getattr(message, "video", None), "file_id", "") if message else ""
+    audio_id = getattr(getattr(message, "audio", None), "file_id", "") if message else ""
+    voice_id = getattr(getattr(message, "voice", None), "file_id", "") if message else ""
+    document_id = getattr(getattr(message, "document", None), "file_id", "") if message else ""
+    sticker_id = getattr(getattr(message, "sticker", None), "file_id", "") if message else ""
+    contact_phone = getattr(getattr(message, "contact", None), "phone_number", "") if message else ""
+    location_lat = ""
+    location_lon = ""
+    if message and getattr(message, "location", None):
+        try:
+            location_lat = str(message.location.latitude)
+            location_lon = str(message.location.longitude)
+        except Exception:
+            location_lat = ""
+            location_lon = ""
     if chat_id_override is not None:
         chat_id = chat_id_override
     else:
         chat_id = message.chat.id if message.chat else ""
     replacements = {
+        "{text}": incoming_text,
         "{name}": first_name,
         "{first_name}": first_name,
         "{last_name}": last_name,
         "{username}": f"@{username}" if username else "",
         "{chat_id}": str(chat_id),
         "{full_name}": " ".join(part for part in [first_name, last_name] if part),
+        "{message_id}": str(message_id),
+        "{photo_id}": str(photo_id),
+        "{video_id}": str(video_id),
+        "{audio_id}": str(audio_id),
+        "{voice_id}": str(voice_id),
+        "{document_id}": str(document_id),
+        "{sticker_id}": str(sticker_id),
+        "{contact_phone}": str(contact_phone),
+        "{location_lat}": str(location_lat),
+        "{location_lon}": str(location_lon),
     }
     result = text
     for key, value in replacements.items():
@@ -552,6 +606,10 @@ def match_condition(message: Message, node: dict, bot_id: Optional[str] = None, 
         if not condition_text:
             return False
         checks.append(text_value.lower() == condition_text.lower())
+    elif condition_type == "text_contains":
+        if not condition_text:
+            return False
+        checks.append(condition_text.lower() in text_value.lower())
     elif condition_type == "status":
         if not condition_text or not bot_id or user_id is None:
             return False
@@ -567,6 +625,14 @@ def match_condition(message: Message, node: dict, bot_id: Optional[str] = None, 
         checks.append(message.video is not None)
     elif condition_type == "has_audio":
         checks.append(message.audio is not None)
+    elif condition_type == "has_voice":
+        checks.append(message.voice is not None)
+    elif condition_type == "has_document":
+        checks.append(message.document is not None)
+    elif condition_type == "has_sticker":
+        checks.append(message.sticker is not None)
+    elif condition_type == "has_contact":
+        checks.append(message.contact is not None)
     elif condition_type == "has_location":
         checks.append(message.location is not None)
     elif condition_text:
@@ -613,6 +679,8 @@ def extract_record_value(message: Message, record_field: str) -> str:
     field = (record_field or "").strip()
     if field == "text":
         return (message.text or message.caption or "").strip()
+    if field == "message_id":
+        return str(getattr(message, "message_id", ""))
     if field == "name":
         return getattr(message.from_user, "first_name", "") if message.from_user else ""
     if field == "first_name":
@@ -628,6 +696,12 @@ def extract_record_value(message: Message, record_field: str) -> str:
         return " ".join(part for part in [first, last] if part)
     if field == "chat_id":
         return str(message.chat.id) if message.chat else ""
+    if field == "contact_phone":
+        return getattr(getattr(message, "contact", None), "phone_number", "") or ""
+    if field == "location_lat":
+        return str(getattr(getattr(message, "location", None), "latitude", "") or "")
+    if field == "location_lon":
+        return str(getattr(getattr(message, "location", None), "longitude", "") or "")
     if field == "photo_id":
         if message.photo:
             return message.photo[-1].file_id
@@ -636,8 +710,12 @@ def extract_record_value(message: Message, record_field: str) -> str:
         return message.video.file_id if message.video else ""
     if field == "audio_id":
         return message.audio.file_id if message.audio else ""
+    if field == "voice_id":
+        return message.voice.file_id if message.voice else ""
     if field == "document_id":
         return message.document.file_id if message.document else ""
+    if field == "sticker_id":
+        return message.sticker.file_id if message.sticker else ""
     return ""
 
 
@@ -2013,7 +2091,7 @@ async def run_bot_polling(bot: Bot) -> None:
 
     try:
         await telegram_bot.delete_webhook(drop_pending_updates=True)
-        await dispatcher.start_polling(telegram_bot, stop_event=stop_event)
+        await dispatcher.start_polling(telegram_bot, stop_event=stop_event, handle_signals=False)
     finally:
         await telegram_bot.session.close()
         if scheduler_task:

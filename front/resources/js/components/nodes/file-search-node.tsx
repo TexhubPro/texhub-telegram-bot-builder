@@ -1,8 +1,8 @@
-﻿import { Handle, Position, type NodeProps } from 'reactflow';
+import { Handle, Position, type NodeProps } from 'reactflow';
 import { NodeActionButtons } from './node-action-buttons';
 import type { NodeData } from '../types';
 
-export function FileSearchNode({ data, id }: NodeProps<NodeData>) {
+export function FileSearchNode({ data, id, selected }: NodeProps<NodeData>) {
     const column = (data.searchColumnName || '').trim();
 
     return (
@@ -19,7 +19,7 @@ export function FileSearchNode({ data, id }: NodeProps<NodeData>) {
                 position={Position.Left}
                 style={{ width: 12, height: 12, borderWidth: 2, background: '#0d9488', top: '65%' }}
             />
-            <NodeActionButtons nodeId={id} canEdit />
+            <NodeActionButtons nodeId={id} isVisible={selected} canEdit />
             <div className="min-w-[180px]">
                 <div className="text-xs font-semibold tracking-wide text-teal-600 uppercase">Поиск</div>
                 <div className="text-sm font-semibold">Поиск в файле</div>
@@ -39,4 +39,5 @@ export function FileSearchNode({ data, id }: NodeProps<NodeData>) {
             />
         </div>
     );
-}
+}
+

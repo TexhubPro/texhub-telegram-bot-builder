@@ -18,13 +18,13 @@ const resolveSeconds = (value?: number | string) => {
     return 0;
 };
 
-export function TimerNode({ data, id }: NodeProps<NodeData>) {
+export function TimerNode({ data, id, selected }: NodeProps<NodeData>) {
     const { onOpenAddMenu } = useContext(AddEdgeMenuContext);
     const seconds = resolveSeconds(data.timerSeconds);
     return (
         <div className="group relative rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900 shadow-[0_10px_24px_rgba(99,102,241,0.18)]">
             <Handle type="target" position={Position.Left} style={{ width: 12, height: 12, borderWidth: 2, background: '#4f46e5' }} />
-            <NodeActionButtons nodeId={id} canEdit />
+            <NodeActionButtons nodeId={id} isVisible={selected} canEdit />
             <div className="max-w-96 min-w-fit">
                 <div className="text-xs font-semibold tracking-wide text-indigo-600 uppercase">Таймер</div>
                 <div className="text-sm font-semibold">{seconds} сек</div>
@@ -46,3 +46,4 @@ export function TimerNode({ data, id }: NodeProps<NodeData>) {
         </div>
     );
 }
+

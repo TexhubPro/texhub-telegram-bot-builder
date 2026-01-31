@@ -1,13 +1,15 @@
-﻿import { Handle, Position, type NodeProps } from 'reactflow';
+import { Handle, Position, type NodeProps } from 'reactflow';
 import { NodeActionButtons } from './node-action-buttons';
 import type { NodeData } from '../types';
 
-export function ConditionNode({ data, id }: NodeProps<NodeData>) {
+export function ConditionNode({ data, id, selected }: NodeProps<NodeData>) {
     const text = (data.conditionText || '').trim();
     const typeLabel = (() => {
         switch (data.conditionType) {
             case 'text':
                 return text ? `= ${text}` : 'Текст';
+            case 'text_contains':
+                return text ? `Содержит: ${text}` : 'Содержит текст';
             case 'status':
                 return text ? `Статус = ${text}` : 'Статус';
             case 'has_text':
@@ -20,6 +22,14 @@ export function ConditionNode({ data, id }: NodeProps<NodeData>) {
                 return 'Есть видео';
             case 'has_audio':
                 return 'Есть аудио';
+            case 'has_voice':
+                return 'Есть голосовое';
+            case 'has_document':
+                return 'Есть документ';
+            case 'has_sticker':
+                return 'Есть стикер';
+            case 'has_contact':
+                return 'Есть контакт';
             case 'has_location':
                 return 'Есть гео';
             default:
@@ -40,7 +50,7 @@ export function ConditionNode({ data, id }: NodeProps<NodeData>) {
     return (
         <div className="group relative rounded-lg border border-fuchsia-200 bg-fuchsia-50 px-4 py-3 text-sm text-fuchsia-900 shadow-[0_10px_24px_rgba(217,70,239,0.18)]">
             <Handle type="target" position={Position.Left} style={{ width: 12, height: 12, borderWidth: 2, background: '#c026d3' }} />
-            <NodeActionButtons nodeId={id} canEdit />
+            <NodeActionButtons nodeId={id} isVisible={selected} canEdit />
             <div className="min-w-[170px]">
                 <div className="text-xs font-semibold tracking-wide text-fuchsia-600 uppercase">Проверка</div>
                 <div className="text-sm font-semibold">{typeLabel}</div>
@@ -63,3 +73,4 @@ export function ConditionNode({ data, id }: NodeProps<NodeData>) {
         </div>
     );
 }
+

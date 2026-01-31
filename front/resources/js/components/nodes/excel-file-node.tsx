@@ -1,4 +1,4 @@
-﻿import { useContext, useRef, useState } from 'react';
+import { useContext, useRef, useState } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { NodeActionButtons } from './node-action-buttons';
 import { DownloadIcon, UploadIcon } from '../ui/icons';
@@ -7,7 +7,7 @@ import type { NodeData } from '../types';
 
 const API_BASE = (import.meta.env.VITE_API_BASE ?? 'https://toocars.tj').replace(/\/+$/, '');
 
-export function ExcelFileNode({ data, id }: NodeProps<NodeData>) {
+export function ExcelFileNode({ data, id, selected }: NodeProps<NodeData>) {
     const name = (data.fileName || '').trim();
     const hasFile = Boolean(name);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -68,7 +68,7 @@ export function ExcelFileNode({ data, id }: NodeProps<NodeData>) {
         <div className="group relative rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 shadow-[0_10px_24px_rgba(16,185,129,0.18)]">
             <Handle type="target" position={Position.Left} style={{ width: 12, height: 12, borderWidth: 2, background: '#059669' }} />
 
-            <NodeActionButtons nodeId={id} canEdit />
+            <NodeActionButtons nodeId={id} isVisible={selected} canEdit />
             <div className="pointer-events-none absolute -top-[8px] right-1 z-10 flex items-center gap-1 opacity-0 transition group-hover:opacity-100 group-hover:pointer-events-auto">
                 <button
                     type="button"
@@ -117,6 +117,7 @@ export function ExcelFileNode({ data, id }: NodeProps<NodeData>) {
             <Handle type="source" position={Position.Right} style={{ width: 12, height: 12, borderWidth: 2, background: '#059669' }} />
         </div>
     );
-}
-
-
+}
+
+
+

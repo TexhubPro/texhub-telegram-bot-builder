@@ -1,7 +1,7 @@
 import { Input } from '@heroui/react';
 
 type Props = {
-    label: string;
+    label?: string;
     value: string;
     onChange: (value: string) => void;
     placeholder?: string;
@@ -11,11 +11,12 @@ type Props = {
 };
 
 export function FieldInput({ label, value, onChange, placeholder, type, min, step }: Props) {
+    const ariaLabel = label || placeholder || 'input';
     return (
         <div className="flex flex-col gap-2">
-            <label className="block text-xs font-semibold text-slate-600">{label}</label>
+            {label ? <label className="block text-lg mt-5 font-semibold text-slate-600">{label}</label> : null}
             <Input
-                aria-label={label}
+                aria-label={ariaLabel}
                 value={value}
                 onValueChange={onChange}
                 placeholder={placeholder}

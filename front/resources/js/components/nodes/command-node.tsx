@@ -5,12 +5,12 @@ import { NodeActionButtons } from './node-action-buttons';
 import type { NodeData } from '../types';
 import { PlusIcon } from '../ui/icons';
 
-export function CommandNode({ data, id }: NodeProps<NodeData>) {
+export function CommandNode({ data, id, selected }: NodeProps<NodeData>) {
     const { onOpenAddMenu } = useContext(AddEdgeMenuContext);
     return (
         <div className="group relative rounded-lg border-2 border-purple-600 bg-purple-500 text-white">
             <Handle type="target" position={Position.Left} style={{ width: 14, height: 14, borderWidth: 2, background: '#4338ca' }} />
-            <NodeActionButtons nodeId={id} canEdit />
+            <NodeActionButtons nodeId={id} isVisible={selected} canEdit />
             <div className="min-w-[150px]">
                 <div className="rounded-t-md bg-white px-3 py-0.5 text-xs font-semibold tracking-wide text-purple-500 uppercase">Команда</div>
                 <div className="px-3 py-1 text-sm font-semibold">{data.commandText ?? '/start'}</div>
@@ -32,3 +32,4 @@ export function CommandNode({ data, id }: NodeProps<NodeData>) {
         </div>
     );
 }
+

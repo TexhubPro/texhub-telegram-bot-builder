@@ -1,5 +1,8 @@
 @import 'tailwindcss';
+@plugin '../hero';
 
+@source '../js/**/*.{js,ts,jsx,tsx}';
+@source '../../node_modules/@heroui/**/*.{js,mjs,ts,jsx,tsx}';
 @source '../views';
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 

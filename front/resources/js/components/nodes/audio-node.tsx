@@ -2,7 +2,7 @@ import { Handle, Position, type NodeProps } from 'reactflow';
 import { NodeActionButtons } from './node-action-buttons';
 import type { NodeData } from '../types';
 
-export function AudioNode({ data, id }: NodeProps<NodeData>) {
+export function AudioNode({ data, id, selected }: NodeProps<NodeData>) {
     const count = data.audioUrls?.length ?? 0;
     const label = count === 1 ? '1 аудио' : `${count} аудио`;
     return (
@@ -12,7 +12,7 @@ export function AudioNode({ data, id }: NodeProps<NodeData>) {
                 position={Position.Left}
                 style={{ width: 12, height: 12, borderWidth: 2, background: '#d97706' }}
             />
-            <NodeActionButtons nodeId={id} canEdit />
+            <NodeActionButtons nodeId={id} isVisible={selected} canEdit />
             <div className="min-w-[170px]">
                 <div className="text-xs font-semibold uppercase tracking-wide text-amber-600">Аудио</div>
                 <div className="text-sm font-semibold">{count ? label : 'Нет аудио'}</div>
@@ -25,3 +25,4 @@ export function AudioNode({ data, id }: NodeProps<NodeData>) {
         </div>
     );
 }
+

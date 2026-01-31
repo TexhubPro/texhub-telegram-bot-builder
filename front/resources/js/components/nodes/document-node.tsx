@@ -2,7 +2,7 @@ import { Handle, Position, type NodeProps } from 'reactflow';
 import { NodeActionButtons } from './node-action-buttons';
 import type { NodeData } from '../types';
 
-export function DocumentNode({ data, id }: NodeProps<NodeData>) {
+export function DocumentNode({ data, id, selected }: NodeProps<NodeData>) {
     const count = data.documentUrls?.length ?? 0;
     const label = count === 1 ? '1 файл' : `${count} файлов`;
     return (
@@ -12,7 +12,7 @@ export function DocumentNode({ data, id }: NodeProps<NodeData>) {
                 position={Position.Left}
                 style={{ width: 12, height: 12, borderWidth: 2, background: '#334155' }}
             />
-            <NodeActionButtons nodeId={id} canEdit />
+            <NodeActionButtons nodeId={id} isVisible={selected} canEdit />
             <div className="min-w-[170px]">
                 <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Документ</div>
                 <div className="text-sm font-semibold">{count ? label : 'Нет файлов'}</div>
@@ -25,3 +25,4 @@ export function DocumentNode({ data, id }: NodeProps<NodeData>) {
         </div>
     );
 }
+

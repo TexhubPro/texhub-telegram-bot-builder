@@ -1,11 +1,11 @@
-﻿import { useContext } from 'react';
+import { useContext } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { AddEdgeMenuContext } from './add-edge-context';
 import { NodeActionButtons } from './node-action-buttons';
 import type { NodeData } from '../types';
 import { PlusIcon } from '../ui/icons';
 
-export function StatusGetNode({ data, id }: NodeProps<NodeData>) {
+export function StatusGetNode({ data, id, selected }: NodeProps<NodeData>) {
     const { onOpenAddMenu } = useContext(AddEdgeMenuContext);
     return (
         <div className="group relative rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 shadow-[0_10px_24px_rgba(56,189,248,0.18)]">
@@ -14,7 +14,7 @@ export function StatusGetNode({ data, id }: NodeProps<NodeData>) {
                 position={Position.Left}
                 style={{ width: 12, height: 12, borderWidth: 2, background: '#0284c7' }}
             />
-            <NodeActionButtons nodeId={id} canEdit={false} />
+            <NodeActionButtons nodeId={id} isVisible={selected} canEdit={false} />
             <div className="min-w-[170px]">
                 <div className="text-xs font-semibold uppercase tracking-wide text-sky-600">Статус</div>
                 <div className="text-sm font-semibold">Получить</div>
@@ -39,4 +39,5 @@ export function StatusGetNode({ data, id }: NodeProps<NodeData>) {
             ) : null}
         </div>
     );
-}
+}
+

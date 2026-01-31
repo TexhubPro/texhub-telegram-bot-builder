@@ -1,21 +1,26 @@
+import { Textarea } from '@heroui/react';
+
 type Props = {
-    label: string;
+    label?: string;
     value: string;
     onChange: (value: string) => void;
     placeholder?: string;
 };
 
 export function FieldTextarea({ label, value, onChange, placeholder }: Props) {
+    const ariaLabel = label || placeholder || 'textarea';
     return (
         <div className="flex flex-col gap-2">
-            <label className="block text-xs font-semibold text-slate-600">{label}</label>
-            <textarea
-                aria-label={label}
+            {label ? <label className="block text-lg mt-5 font-semibold text-slate-600">{label}</label> : null}
+            <Textarea
+                aria-label={ariaLabel}
                 value={value}
-                onChange={(event) => onChange(event.target.value)}
+                onValueChange={onChange}
                 placeholder={placeholder}
-                rows={6}
-                className="w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                minRows={6}
+                variant="bordered"
+                size="sm"
+                classNames={{ inputWrapper: 'mt-0.5', input: 'resize-y' }}
             />
         </div>
     );

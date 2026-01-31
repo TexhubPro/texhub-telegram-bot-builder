@@ -16,7 +16,7 @@ const recordLabels: Record<string, string> = {
     document_id: 'Document file_id',
 };
 
-export function RecordNode({ data, id }: NodeProps<NodeData>) {
+export function RecordNode({ data, id, selected }: NodeProps<NodeData>) {
     const field = data.recordField || 'text';
     const label = recordLabels[field] || 'Запись';
 
@@ -24,7 +24,7 @@ export function RecordNode({ data, id }: NodeProps<NodeData>) {
         <div className="group relative rounded-lg border border-lime-200 bg-lime-50 px-4 py-3 text-sm text-lime-900 shadow-[0_10px_24px_rgba(132,204,22,0.18)]">
             <Handle type="target" position={Position.Left} style={{ width: 12, height: 12, borderWidth: 2, background: '#65a30d' }} />
 
-            <NodeActionButtons nodeId={id} canEdit />
+            <NodeActionButtons nodeId={id} isVisible={selected} canEdit />
 
             <div className="min-w-[170px]">
                 <div className="text-xs font-semibold tracking-wide text-lime-600 uppercase">Запись</div>
@@ -35,3 +35,4 @@ export function RecordNode({ data, id }: NodeProps<NodeData>) {
         </div>
     );
 }
+
