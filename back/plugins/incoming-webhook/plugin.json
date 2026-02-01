@@ -1,0 +1,29 @@
+{
+  "id": "incoming-webhook",
+  "name": "Incoming Webhook",
+  "version": "1.0.0",
+  "description": "Входящий вебхук с внешнего приложения",
+  "backend": {
+    "module": "backend.py",
+    "handler": "run"
+  },
+  "nodes": [
+    {
+      "kind": "plugin_webhook_in",
+      "title": "Входящий вебхук",
+      "subtitle": "Приём данных",
+      "group": "Интеграции",
+      "color": "#E3F2FD",
+      "noInput": true,
+      "inputs": [
+        {
+          "key": "url",
+          "label": "URL",
+          "type": "text",
+          "placeholder": "URL генерируется автоматически"
+        }
+      ],
+      "outputs": ["out"]
+    }
+  ]
+}

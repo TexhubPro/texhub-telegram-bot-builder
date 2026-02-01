@@ -1,0 +1,63 @@
+{
+  "id": "memory-store",
+  "name": "Memory Store",
+  "version": "1.0.0",
+  "description": "Временная память (key-value)",
+  "backend": {
+    "module": "backend.py",
+    "handler": "run"
+  },
+  "nodes": [
+    {
+      "kind": "plugin_memory",
+      "title": "Память",
+      "subtitle": "Временные данные",
+      "group": "Интеграции",
+      "color": "#E8F5E9",
+      "inputs": [
+        {
+          "key": "key",
+          "label": "Ключ",
+          "type": "text",
+          "placeholder": "coupon_code"
+        },
+        {
+          "key": "action",
+          "label": "Действие",
+          "type": "select",
+          "default": "set",
+          "options": [
+            { "value": "set", "label": "Сохранить" },
+            { "value": "get", "label": "Получить" },
+            { "value": "append", "label": "Добавить (append)" },
+            { "value": "clear", "label": "Очистить" }
+          ]
+        },
+        {
+          "key": "value",
+          "label": "Значение",
+          "type": "textarea",
+          "placeholder": "Любой текст или {text}"
+        },
+        {
+          "key": "compareOp",
+          "label": "Проверка",
+          "type": "select",
+          "default": "none",
+          "options": [
+            { "value": "none", "label": "Без проверки" },
+            { "value": "eq", "label": "Равно" },
+            { "value": "contains", "label": "Содержит" }
+          ]
+        },
+        {
+          "key": "compareValue",
+          "label": "Значение для проверки",
+          "type": "text",
+          "placeholder": "expected"
+        }
+      ],
+      "outputs": ["true", "false"]
+    }
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "id": "array-tools",
+  "name": "Array Tools",
+  "version": "1.1.0",
+  "description": "Работа с массивами",
+  "backend": {
+    "module": "backend.py",
+    "handler": "run"
+  },
+  "nodes": [
+    {
+      "kind": "plugin_array",
+      "title": "Массив",
+      "subtitle": "Взять элемент",
+      "group": "Интеграции",
+      "color": "#F3E5F5",
+      "inputs": [
+        {
+          "key": "source",
+          "label": "Источник массива",
+          "type": "text",
+          "placeholder": "items"
+        },
+        {
+          "key": "mode",
+          "label": "Режим",
+          "type": "select",
+          "options": [
+            { "label": "Взять элемент", "value": "item" },
+            { "label": "Объединить элементы", "value": "join" }
+          ]
+        },
+        {
+          "key": "index",
+          "label": "Индекс",
+          "type": "number",
+          "placeholder": "0"
+        },
+        {
+          "key": "field",
+          "label": "Поле элемента (опц.)",
+          "type": "text",
+          "placeholder": "name"
+        },
+        {
+          "key": "joinTemplate",
+          "label": "Шаблон строки",
+          "type": "text",
+          "placeholder": "Имя: {item.name}, Тел: {item.phone}"
+        },
+        {
+          "key": "joinSeparator",
+          "label": "Разделитель",
+          "type": "text",
+          "placeholder": "\\n"
+        },
+        {
+          "key": "outputKey",
+          "label": "Сохранить в переменную",
+          "type": "text",
+          "placeholder": "item_value"
+        }
+      ],
+      "outputs": ["true", "false"]
+    }
+  ]
+}

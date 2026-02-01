@@ -1,0 +1,72 @@
+{
+  "id": "counter",
+  "name": "Counter",
+  "version": "1.0.0",
+  "description": "Счётчик",
+  "backend": {
+    "module": "backend.py",
+    "handler": "run"
+  },
+  "nodes": [
+    {
+      "kind": "plugin_counter",
+      "title": "Счётчик",
+      "subtitle": "Увеличить/проверить",
+      "group": "Интеграции",
+      "color": "#FFF3E0",
+      "inputs": [
+        {
+          "key": "key",
+          "label": "Ключ",
+          "type": "text",
+          "placeholder": "coupon_limit"
+        },
+        {
+          "key": "action",
+          "label": "Действие",
+          "type": "select",
+          "default": "inc",
+          "options": [
+            { "value": "init", "label": "Инициализировать" },
+            { "value": "set", "label": "Установить" },
+            { "value": "inc", "label": "Увеличить" },
+            { "value": "dec", "label": "Уменьшить" },
+            { "value": "get", "label": "Получить" },
+            { "value": "reset", "label": "Сбросить (0)" }
+          ]
+        },
+        {
+          "key": "start",
+          "label": "Начальное значение",
+          "type": "number",
+          "placeholder": "0"
+        },
+        {
+          "key": "step",
+          "label": "Шаг",
+          "type": "number",
+          "placeholder": "1"
+        },
+        {
+          "key": "compareOp",
+          "label": "Проверка",
+          "type": "select",
+          "default": "none",
+          "options": [
+            { "value": "none", "label": "Без проверки" },
+            { "value": "eq", "label": "Равно" },
+            { "value": "gte", "label": "Больше или равно" },
+            { "value": "lt", "label": "Меньше" }
+          ]
+        },
+        {
+          "key": "compareValue",
+          "label": "Значение для проверки",
+          "type": "number",
+          "placeholder": "10"
+        }
+      ],
+      "outputs": ["true", "false"]
+    }
+  ]
+}

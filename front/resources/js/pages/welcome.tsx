@@ -678,8 +678,15 @@ export default function Welcome() {
                     pluginValues[field.key] = '';
                 }
             });
+            const nodeId = generateId(definition.kind || 'plugin');
+            if (definition.kind === 'plugin_webhook_in') {
+                const botId = bot?.id;
+                if (botId) {
+                    pluginValues.url = `${API_BASE}/webhook/${botId}/${nodeId}`;
+                }
+            }
             addNodeAndEdit({
-                id: generateId(definition.kind || 'plugin'),
+                id: nodeId,
                 type: 'plugin',
                 position: { x: 520, y: 220 },
                 data: {
@@ -697,7 +704,7 @@ export default function Welcome() {
                 },
             });
         },
-        [addNodeAndEdit, generateId]
+        [addNodeAndEdit, bot?.id, generateId]
     );
 
     const handleAddMessageButtonNode = useCallback(() => {

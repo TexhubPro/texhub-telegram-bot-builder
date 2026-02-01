@@ -16,6 +16,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from aiogram import Bot as TelegramBot
 from aiogram import Dispatcher
 from aiogram.filters import Command
+from aiogram.enums import ParseMode
 from aiogram.types import (
     CallbackQuery,
     CopyTextButton,
@@ -32,7 +33,7 @@ from aiogram.types import (
     WebAppInfo,
     FSInputFile,
 )
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Body
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -95,6 +96,26 @@ def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def get_counter_value(bot_id: str, key: str) -> int:
+    with get_connection() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS plugin_counter (
+                bot_id TEXT NOT NULL,
+                counter_key TEXT NOT NULL,
+                counter_value INTEGER NOT NULL,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (bot_id, counter_key)
+            )
+            """
+        )
+        row = conn.execute(
+            "SELECT counter_value FROM plugin_counter WHERE bot_id = ? AND counter_key = ?",
+            (bot_id, key),
+        ).fetchone()
+        return int(row["counter_value"]) if row else 0
 
 
 def init_db() -> None:
@@ -216,6 +237,21 @@ def get_plugins_payload() -> List[dict]:
             }
         )
     return payload
+
+
+def flatten_payload(prefix: str, payload, result: dict) -> None:
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            str_key = str(key)
+            path = f"{prefix}.{str_key}" if prefix else str_key
+            result[path] = value
+            flatten_payload(path, value, result)
+    elif isinstance(payload, list):
+        result[f"{prefix}.length" if prefix else "array_length"] = len(payload)
+        for index, value in enumerate(payload):
+            path = f"{prefix}[{index}]" if prefix else f"array[{index}]"
+            result[path] = value
+            flatten_payload(path, value, result)
 
 
 @app.on_event("startup")
@@ -554,7 +590,10 @@ def render_template(
 ) -> str:
     if not text:
         return ""
-    source = user or message.from_user
+    now = datetime.now()
+    current_date = now.strftime("%Y-%m-%d")
+    current_time = now.strftime("%H:%M:%S")
+    source = user or (getattr(message, "from_user", None) if message else None)
     first_name = getattr(source, "first_name", "") if source else ""
     last_name = getattr(source, "last_name", "") if source else ""
     username = getattr(source, "username", "") if source else ""
@@ -604,6 +643,8 @@ def render_template(
         "{contact_phone}": str(contact_phone),
         "{location_lat}": str(location_lat),
         "{location_lon}": str(location_lon),
+        "{date}": current_date,
+        "{time}": current_time,
     }
     result = text
     for key, value in replacements.items():
@@ -619,6 +660,33 @@ def render_template(
         for key, value in safe_vars.items():
             result = result.replace(f"{{var.{key}}}", value)
     return result
+
+
+def detect_parse_mode(text: str) -> Optional[ParseMode]:
+    if not text:
+        return None
+    lowered = text.lower()
+    if (
+        "<b>" in lowered
+        or "</b>" in lowered
+        or "<strong>" in lowered
+        or "</strong>" in lowered
+        or "<i>" in lowered
+        or "</i>" in lowered
+        or "<em>" in lowered
+        or "</em>" in lowered
+        or "<u>" in lowered
+        or "</u>" in lowered
+        or "<s>" in lowered
+        or "</s>" in lowered
+        or "<code>" in lowered
+        or "</code>" in lowered
+        or "<pre>" in lowered
+        or "</pre>" in lowered
+        or "<a " in lowered
+    ):
+        return ParseMode.HTML
+    return None
 
 
 def find_command_node(flow: Flow, command: str) -> Optional[dict]:
@@ -658,13 +726,20 @@ def parse_chat_id(node: dict) -> Optional[int]:
     return value
 
 
-def parse_subscription_chat_id(node: dict) -> Optional[int]:
+def parse_subscription_chat_id(node: dict) -> Optional[object]:
     data = node.get("data", {})
     raw = data.get("subscriptionChatId")
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        raw = raw.strip()
+        if raw.startswith("@"):
+            return raw
     try:
         value = int(raw)
     except (TypeError, ValueError):
         return None
+    return value
 
 
 def parse_schedule_node(node: dict) -> Optional[dict]:
@@ -763,9 +838,16 @@ async def run_plugin_node(
     return value
 
 
-async def is_user_subscribed(telegram_bot: TelegramBot, chat_id: int, user_id: int) -> bool:
+async def is_user_subscribed(telegram_bot: TelegramBot, chat_id: object, user_id: int) -> bool:
     try:
-        member = await telegram_bot.get_chat_member(chat_id, user_id)
+        resolved_chat_id = chat_id
+        if isinstance(chat_id, str):
+            try:
+                chat = await telegram_bot.get_chat(chat_id)
+                resolved_chat_id = chat.id
+            except Exception:
+                return False
+        member = await telegram_bot.get_chat_member(resolved_chat_id, user_id)
     except Exception:
         return False
     status = getattr(member, "status", "") or ""
@@ -971,6 +1053,7 @@ async def collect_content_targets_with_delay(
     message: Message | None = None,
     bot_id: Optional[str] = None,
     user_id: Optional[int] = None,
+    initial_vars: Optional[dict] = None,
 ) -> List[Tuple[dict, float, Optional[int], Optional[dict], Optional[dict]]]:
     nodes_by_id = {node.get("id"): node for node in flow.nodes}
     results: List[Tuple[dict, float, Optional[int], Optional[dict], Optional[dict]]] = []
@@ -988,7 +1071,7 @@ async def collect_content_targets_with_delay(
             dict,
         ]
     ] = [
-        (source_id, 0.0, None, None, None, None, None, {})
+        (source_id, 0.0, None, None, None, None, None, dict(initial_vars or {}))
     ]
     effective_user_id = user_id
     if effective_user_id is None and message and message.from_user:
@@ -1403,7 +1486,9 @@ async def collect_scheduled_targets(
 
         if current_kind == "plugin":
             plugin_kind = (current_node.get("data", {}).get("pluginKind") or "").strip()
-            if plugin_kind == "plugin_broadcast":
+            if plugin_kind == "plugin_webhook_in":
+                current_output = "out"
+            elif plugin_kind == "plugin_broadcast":
                 broadcast_entries = list(user_entries)
             else:
                 output, new_vars = await run_plugin_node(
@@ -1479,13 +1564,20 @@ async def send_images_via_bot(
     urls: List[str],
     caption: str = "",
     reply_markup=None,
+    parse_mode: Optional[str] = None,
 ) -> bool:
     sources = [resolve_upload_source(url) for url in urls]
     sources = [source for source in sources if source]
     if not sources:
         return False
     if len(sources) == 1:
-        await telegram_bot.send_photo(chat_id, sources[0], caption=caption or None, reply_markup=reply_markup)
+        await telegram_bot.send_photo(
+            chat_id,
+            sources[0],
+            caption=caption or None,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )
         return True
     media = []
     for idx, source in enumerate(sources):
@@ -1503,13 +1595,20 @@ async def send_videos_via_bot(
     urls: List[str],
     caption: str = "",
     reply_markup=None,
+    parse_mode: Optional[str] = None,
 ) -> bool:
     sources = [resolve_upload_source(url) for url in urls]
     sources = [source for source in sources if source]
     if not sources:
         return False
     if len(sources) == 1:
-        await telegram_bot.send_video(chat_id, sources[0], caption=caption or None, reply_markup=reply_markup)
+        await telegram_bot.send_video(
+            chat_id,
+            sources[0],
+            caption=caption or None,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )
         return True
     media = []
     for idx, source in enumerate(sources):
@@ -1527,13 +1626,20 @@ async def send_audios_via_bot(
     urls: List[str],
     caption: str = "",
     reply_markup=None,
+    parse_mode: Optional[str] = None,
 ) -> bool:
     sources = [resolve_upload_source(url) for url in urls]
     sources = [source for source in sources if source]
     if not sources:
         return False
     if len(sources) == 1:
-        await telegram_bot.send_audio(chat_id, sources[0], caption=caption or None, reply_markup=reply_markup)
+        await telegram_bot.send_audio(
+            chat_id,
+            sources[0],
+            caption=caption or None,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )
         return True
     media = []
     for idx, source in enumerate(sources):
@@ -1551,13 +1657,20 @@ async def send_documents_via_bot(
     urls: List[str],
     caption: str = "",
     reply_markup=None,
+    parse_mode: Optional[str] = None,
 ) -> bool:
     sources = [resolve_upload_source(url) for url in urls]
     sources = [source for source in sources if source]
     if not sources:
         return False
     if len(sources) == 1:
-        await telegram_bot.send_document(chat_id, sources[0], caption=caption or None, reply_markup=reply_markup)
+        await telegram_bot.send_document(
+            chat_id,
+            sources[0],
+            caption=caption or None,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )
         return True
     media = []
     for idx, source in enumerate(sources):
@@ -1606,6 +1719,7 @@ async def send_content_node_to_chat(
             row_data=row_data,
             extra_vars=extra_vars,
         )
+        parse_mode = detect_parse_mode(message_text)
         image_urls = collect_image_urls(flow, target_node.get("id") or "")
         video_urls = collect_video_urls(flow, target_node.get("id") or "")
         audio_urls = collect_audio_urls(flow, target_node.get("id") or "")
@@ -1615,31 +1729,64 @@ async def send_content_node_to_chat(
         reply_used = False
         if image_urls:
             caption = message_text if message_text and not caption_used else ""
-            await send_images_via_bot(telegram_bot, chat_id, image_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+            await send_images_via_bot(
+                telegram_bot,
+                chat_id,
+                image_urls,
+                caption=caption,
+                reply_markup=reply_markup if not reply_used else None,
+                parse_mode=parse_mode if caption else None,
+            )
             if caption:
                 caption_used = True
                 reply_used = True
         if video_urls:
             caption = message_text if message_text and not caption_used else ""
-            await send_videos_via_bot(telegram_bot, chat_id, video_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+            await send_videos_via_bot(
+                telegram_bot,
+                chat_id,
+                video_urls,
+                caption=caption,
+                reply_markup=reply_markup if not reply_used else None,
+                parse_mode=parse_mode if caption else None,
+            )
             if caption:
                 caption_used = True
                 reply_used = True
         if audio_urls:
             caption = message_text if message_text and not caption_used else ""
-            await send_audios_via_bot(telegram_bot, chat_id, audio_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+            await send_audios_via_bot(
+                telegram_bot,
+                chat_id,
+                audio_urls,
+                caption=caption,
+                reply_markup=reply_markup if not reply_used else None,
+                parse_mode=parse_mode if caption else None,
+            )
             if caption:
                 caption_used = True
                 reply_used = True
         if document_urls:
             caption = message_text if message_text and not caption_used else ""
-            await send_documents_via_bot(telegram_bot, chat_id, document_urls, caption=caption, reply_markup=reply_markup if not reply_used else None)
+            await send_documents_via_bot(
+                telegram_bot,
+                chat_id,
+                document_urls,
+                caption=caption,
+                reply_markup=reply_markup if not reply_used else None,
+                parse_mode=parse_mode if caption else None,
+            )
             if caption:
                 caption_used = True
                 reply_used = True
         if not (image_urls or video_urls or audio_urls or document_urls):
             if message_text:
-                await telegram_bot.send_message(chat_id, message_text, reply_markup=reply_markup)
+                await telegram_bot.send_message(
+                    chat_id,
+                    message_text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                )
         return
     if kind == "image":
         urls = payload.get("imageUrls") or []
@@ -2392,6 +2539,61 @@ def health() -> dict:
 @app.get("/plugins")
 def list_plugins() -> List[dict]:
     return get_plugins_payload()
+
+
+@app.get("/bots/{bot_id}/plugins/counter/{key}")
+def get_counter(bot_id: str, key: str) -> dict:
+    return {"value": get_counter_value(bot_id, key)}
+
+
+@app.post("/webhook/{bot_id}/{node_id}")
+async def incoming_webhook(bot_id: str, node_id: str, payload: dict | list = Body(default=None)) -> dict:
+    bot = get_bot_or_404(bot_id)
+    if not bot.token:
+        raise HTTPException(status_code=400, detail="Bot token missing")
+    flow = FLOW_CACHE.get(bot.id) or bot.flow
+    node = next((n for n in flow.nodes if n.get("id") == node_id), None)
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+    variables: dict = {}
+    if payload is not None:
+        variables["payload"] = payload
+        flatten_payload("", payload, variables)
+        if isinstance(payload, list):
+            variables["array"] = payload
+            variables["array_len"] = len(payload)
+    targets = await collect_content_targets_with_delay(
+        flow,
+        node_id,
+        message=None,
+        bot_id=bot_id,
+        user_id=None,
+        initial_vars=variables,
+    )
+    telegram_bot = TelegramBot(bot.token)
+    errors: list = []
+    try:
+        ordered = sorted(targets, key=lambda item: item[1])
+        elapsed = 0.0
+        for target_node, delay, target_chat_id, row_data, extra_vars in ordered:
+            wait_time = delay - elapsed
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
+                elapsed = delay
+            chat_id = target_chat_id
+            if chat_id is None:
+                chat_id = extra_vars.get("chat_id") or extra_vars.get("chatId")
+            if chat_id is None:
+                continue
+            try:
+                await send_content_node_to_chat(flow, telegram_bot, int(chat_id), target_node, None, row_data, extra_vars)
+            except Exception as exc:
+                errors.append({"chat_id": chat_id, "error": str(exc)})
+    finally:
+        await telegram_bot.session.close()
+    if errors:
+        return {"status": "partial", "errors": errors}
+    return {"status": "ok"}
 
 
 @app.post("/bots", response_model=Bot)
