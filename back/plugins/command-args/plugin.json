@@ -1,0 +1,46 @@
+{
+  "id": "command-args",
+  "name": "Command Args",
+  "version": "1.0.0",
+  "description": "Получение значения из команды (например /start CODE)",
+  "backend": {
+    "module": "backend.py",
+    "handler": "run"
+  },
+  "nodes": [
+    {
+      "kind": "plugin_command_args",
+      "title": "Команда",
+      "subtitle": "Взять значение",
+      "group": "Интеграции",
+      "color": "#E3F2FD",
+      "inputs": [
+        {
+          "key": "command",
+          "label": "Команда (опц.)",
+          "type": "text",
+          "placeholder": "/start"
+        },
+        {
+          "key": "index",
+          "label": "Индекс аргумента",
+          "type": "number",
+          "placeholder": "0"
+        },
+        {
+          "key": "outputKey",
+          "label": "Сохранить в переменную",
+          "type": "text",
+          "placeholder": "ref_code"
+        },
+        {
+          "key": "defaultValue",
+          "label": "Значение по умолчанию",
+          "type": "text",
+          "placeholder": ""
+        }
+      ],
+      "outputs": ["true", "false"]
+    }
+  ]
+}
