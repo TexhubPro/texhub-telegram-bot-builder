@@ -28,6 +28,7 @@ from aiogram.types import (
     InputMediaVideo,
     KeyboardButton,
     Message,
+    Update,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
     WebAppInfo,
@@ -53,6 +54,8 @@ DB_PATH = os.getenv("BOT_DB", "bot_builder.db")
 UPLOAD_DIR = os.getenv("BOT_UPLOADS", "uploads")
 FILES_DIR = os.getenv("BOT_FILES", "files")
 PLUGINS_DIR = os.getenv("BOT_PLUGINS", "plugins")
+WEBHOOK_CONFIG_PATH = os.getenv("BOT_WEBHOOK_CONFIG", "webhook_config.json")
+WEBHOOK_BASE_URL = os.getenv("BOT_WEBHOOK_BASE", "").strip()
 EXCEL_DIR = os.path.join(FILES_DIR, "excel")
 TEXT_DIR = os.path.join(FILES_DIR, "text")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -535,6 +538,30 @@ def get_bot_or_404(bot_id: str) -> Bot:
     if not row:
         raise HTTPException(status_code=404, detail="Bot not found")
     return row_to_bot(row)
+
+
+def get_bot_by_token(token: str) -> Optional[Bot]:
+    if not token:
+        return None
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM bots WHERE token = ?", (token,)).fetchone()
+    if not row:
+        return None
+    return row_to_bot(row)
+
+
+def get_webhook_base_url() -> str:
+    if WEBHOOK_BASE_URL:
+        return WEBHOOK_BASE_URL.rstrip("/")
+    if os.path.exists(WEBHOOK_CONFIG_PATH):
+        try:
+            with open(WEBHOOK_CONFIG_PATH, "r", encoding="utf-8") as file_obj:
+                data = json.load(file_obj)
+            base_url = (data.get("base_url") or "").strip()
+            return base_url.rstrip("/")
+        except Exception:
+            return ""
+    return ""
 
 
 def update_bot_row(bot: Bot) -> None:
@@ -2377,6 +2404,8 @@ async def run_bot_polling(bot: Bot) -> None:
         return
     dispatcher = Dispatcher()
     telegram_bot = TelegramBot(bot.token)
+    webhook_base = get_webhook_base_url()
+    webhook_url = f"{webhook_base}/webhook/{bot.token}" if webhook_base else ""
     bot_user = await telegram_bot.get_me()
     bot_user_id = bot_user.id if bot_user else None
     chat_admin_cache: Dict[int, bool] = {}
@@ -2497,13 +2526,24 @@ async def run_bot_polling(bot: Bot) -> None:
 
     scheduler_task = asyncio.create_task(schedule_loop())
 
-    RUNNING_BOTS[bot.id] = {"task": asyncio.current_task(), "stop": stop_event, "scheduler": scheduler_task}
+    RUNNING_BOTS[bot.id] = {
+        "task": asyncio.current_task(),
+        "stop": stop_event,
+        "scheduler": scheduler_task,
+        "dispatcher": dispatcher,
+        "bot": telegram_bot,
+    }
 
     try:
-        await telegram_bot.delete_webhook(drop_pending_updates=True)
-        await dispatcher.start_polling(telegram_bot, stop_event=stop_event, handle_signals=False)
+        if webhook_url:
+            await telegram_bot.set_webhook(webhook_url, drop_pending_updates=True)
+        await stop_event.wait()
     finally:
         scheduler_task.cancel()
+        try:
+            await telegram_bot.delete_webhook(drop_pending_updates=True)
+        except Exception:
+            pass
         await telegram_bot.session.close()
         RUNNING_BOTS.pop(bot.id, None)
 
@@ -2515,6 +2555,7 @@ async def stop_bot_task(bot_id: str) -> None:
     stop_event = entry.get("stop")
     task = entry.get("task")
     scheduler = entry.get("scheduler")
+    telegram_bot = entry.get("bot")
     if isinstance(stop_event, asyncio.Event):
         stop_event.set()
     if isinstance(task, asyncio.Task):
@@ -2528,6 +2569,11 @@ async def stop_bot_task(bot_id: str) -> None:
             pass
     if isinstance(scheduler, asyncio.Task):
         scheduler.cancel()
+    if isinstance(telegram_bot, TelegramBot):
+        try:
+            await telegram_bot.delete_webhook(drop_pending_updates=True)
+        except Exception:
+            pass
     RUNNING_BOTS.pop(bot_id, None)
 
 
@@ -2594,6 +2640,26 @@ async def incoming_webhook(bot_id: str, node_id: str, payload: dict | list = Bod
     if errors:
         return {"status": "partial", "errors": errors}
     return {"status": "ok"}
+
+
+@app.post("/webhook/{token}")
+async def telegram_webhook(token: str, update: dict = Body(...)) -> dict:
+    bot = get_bot_by_token(token)
+    if not bot:
+        raise HTTPException(status_code=404, detail="Bot not found")
+    entry = RUNNING_BOTS.get(bot.id)
+    if not entry:
+        raise HTTPException(status_code=409, detail="Bot is not running")
+    dispatcher = entry.get("dispatcher")
+    telegram_bot = entry.get("bot")
+    if not isinstance(dispatcher, Dispatcher) or not isinstance(telegram_bot, TelegramBot):
+        raise HTTPException(status_code=500, detail="Bot dispatcher not ready")
+    try:
+        update_obj = Update.model_validate(update)
+    except Exception:
+        update_obj = Update(**update)
+    await dispatcher.feed_update(telegram_bot, update_obj)
+    return {"ok": True}
 
 
 @app.post("/bots", response_model=Bot)
